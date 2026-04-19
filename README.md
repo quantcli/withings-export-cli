@@ -28,6 +28,7 @@ brew install withings-export
 # set the callback URL to http://127.0.0.1, then:
 export WITHINGS_CLIENT_ID=...
 export WITHINGS_CLIENT_SECRET=...
+export WITHINGS_CALLBACK_URL='https://redirectmeto.com/http://localhost:8128/oauth/authorize'
 
 # Log in (opens your browser) and pull recent data
 withings-export auth login
@@ -75,14 +76,23 @@ Download `withings-export_windows_amd64.zip` from the [releases page](https://gi
 Withings uses OAuth2 — you need your own developer app.
 
 1. Go to <https://developer.withings.com/>, sign in, and **create a new public API app**.
-2. Set the **callback URL** to `http://127.0.0.1` (the CLI uses a local callback on a random port).
+2. Withings requires an **HTTPS** callback URL, so use the [redirectmeto.com](https://redirectmeto.com) bounce trick. Register this as your callback:
+
+   ```
+   https://redirectmeto.com/http://localhost:8128/oauth/authorize
+   ```
+
+   (redirectmeto.com takes any URL after its host and 302-redirects your browser there, so Withings' HTTPS requirement is satisfied while the auth code ends up on your local server.)
 3. Copy the **Client ID** and **Consumer Secret** into env vars (or you'll be prompted):
 
 ```sh
 export WITHINGS_CLIENT_ID=...
 export WITHINGS_CLIENT_SECRET=...
+export WITHINGS_CALLBACK_URL='https://redirectmeto.com/http://localhost:8128/oauth/authorize'
 withings-export auth login
 ```
+
+If `WITHINGS_CALLBACK_URL` is unset the CLI falls back to binding a random port on `127.0.0.1` — only works if your Withings app allows a plain `http://` callback.
 
 Tokens are stored at `~/.config/withings-export/auth.json` (mode `0600`). Access tokens are refreshed automatically when they expire.
 

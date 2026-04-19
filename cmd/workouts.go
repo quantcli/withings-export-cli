@@ -80,7 +80,7 @@ type workoutSeries struct {
 
 type workoutsResponse struct {
 	Series []workoutSeries `json:"series"`
-	More   int             `json:"more"`
+	More   bool            `json:"more"`
 	Offset int             `json:"offset"`
 }
 
@@ -117,7 +117,7 @@ var workoutsCmd = &cobra.Command{
 				return err
 			}
 			all = append(all, resp.Series...)
-			if resp.More == 0 {
+			if !resp.More {
 				break
 			}
 			params.Set("offset", strconv.Itoa(resp.Offset))

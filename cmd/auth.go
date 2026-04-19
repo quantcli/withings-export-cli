@@ -20,11 +20,18 @@ var loginCmd = &cobra.Command{
 	Short: "Log in to Withings via OAuth2 in your browser",
 	Long: `Log in to Withings.
 
-You need a Withings developer app — create one at https://developer.withings.com/
-and set the callback URL to http://127.0.0.1 (any port).
+You need a Withings developer app — create one at https://developer.withings.com/.
+Withings requires an HTTPS callback URL; the recommended workaround is to register
+something like:
 
-Credentials can be supplied via the WITHINGS_CLIENT_ID and WITHINGS_CLIENT_SECRET
-environment variables, or you will be prompted for them.`,
+  https://redirectmeto.com/http://localhost:8128/oauth/authorize
+
+and set WITHINGS_CALLBACK_URL to the exact same value. The CLI will bind a local
+server on the embedded host:port and catch the redirect.
+
+Credentials can be supplied via WITHINGS_CLIENT_ID, WITHINGS_CLIENT_SECRET, and
+WITHINGS_CALLBACK_URL environment variables, or you will be prompted for the
+client id and secret.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		clientID, clientSecret := auth.CredentialsFromEnv()
 
@@ -43,7 +50,8 @@ environment variables, or you will be prompted for them.`,
 			return fmt.Errorf("client ID and secret are required")
 		}
 
-		if err := auth.Login(cmd.Context(), clientID, clientSecret); err != nil {
+		callbackURL := auth.CallbackURLFromEnv()
+		if err := auth.Login(cmd.Context(), clientID, clientSecret, callbackURL); err != nil {
 			return err
 		}
 		fmt.Println("Logged in. Tokens saved to ~/.config/withings-export/auth.json")

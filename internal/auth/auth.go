@@ -30,7 +30,7 @@ type TokenStore struct {
 	AccessToken  string    `json:"access_token"`
 	RefreshToken string    `json:"refresh_token"`
 	ExpiresAt    time.Time `json:"expires_at"`
-	UserID       int       `json:"user_id"`
+	UserID       string    `json:"user_id"`
 	ClientID     string    `json:"client_id"`
 	ClientSecret string    `json:"client_secret"`
 }
@@ -56,16 +56,31 @@ func GetToken() (string, error) {
 
 // Login runs the OAuth2 authorization-code flow against a local callback server.
 // clientID and clientSecret are the developer credentials from dev.withings.com.
-func Login(ctx context.Context, clientID, clientSecret string) error {
+//
+// If callbackURL is empty, a random local port is used with a /callback path.
+// Otherwise callbackURL is used verbatim as the redirect_uri sent to Withings,
+// and the local server binds to the embedded http://localhost:PORT/PATH it
+// contains. This supports the `https://redirectmeto.com/http://localhost:PORT/PATH`
+// workaround for Withings apps that require an HTTPS callback.
+func Login(ctx context.Context, clientID, clientSecret, callbackURL string) error {
 	if clientID == "" || clientSecret == "" {
 		return errors.New("client id and secret are required")
 	}
 
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	bindAddr, callbackPath, redirectURI, err := resolveCallback(callbackURL)
 	if err != nil {
-		return fmt.Errorf("failed to bind local callback port: %w", err)
+		return err
 	}
-	redirectURI := fmt.Sprintf("http://127.0.0.1:%d/callback", listener.Addr().(*net.TCPAddr).Port)
+
+	listener, err := net.Listen("tcp", bindAddr)
+	if err != nil {
+		return fmt.Errorf("failed to bind local callback (%s): %w", bindAddr, err)
+	}
+	if callbackURL == "" {
+		// Replace the 0 port with the actual port the kernel picked.
+		port := listener.Addr().(*net.TCPAddr).Port
+		redirectURI = fmt.Sprintf("http://127.0.0.1:%d%s", port, callbackPath)
+	}
 
 	stateBytes := make([]byte, 16)
 	if _, err := rand.Read(stateBytes); err != nil {
@@ -80,7 +95,7 @@ func Login(ctx context.Context, clientID, clientSecret string) error {
 	resultCh := make(chan result, 1)
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc(callbackPath, func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		if q.Get("state") != state {
 			http.Error(w, "state mismatch", http.StatusBadRequest)
@@ -186,14 +201,14 @@ func refresh(store *TokenStore) error {
 	store.AccessToken = resp.AccessToken
 	store.RefreshToken = resp.RefreshToken
 	store.ExpiresAt = time.Now().Add(time.Duration(resp.ExpiresIn) * time.Second).Add(-5 * time.Minute)
-	if resp.UserID != 0 {
+	if resp.UserID != "" {
 		store.UserID = resp.UserID
 	}
 	return save(store)
 }
 
 type tokenResponse struct {
-	UserID       int    `json:"userid"`
+	UserID       string `json:"userid"`
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
 	ExpiresIn    int    `json:"expires_in"`
@@ -268,4 +283,58 @@ func openBrowser(target string) error {
 func CredentialsFromEnv() (string, string) {
 	return strings.TrimSpace(os.Getenv("WITHINGS_CLIENT_ID")),
 		strings.TrimSpace(os.Getenv("WITHINGS_CLIENT_SECRET"))
+}
+
+// CallbackURLFromEnv returns the WITHINGS_CALLBACK_URL env var or "".
+func CallbackURLFromEnv() string {
+	return strings.TrimSpace(os.Getenv("WITHINGS_CALLBACK_URL"))
+}
+
+// resolveCallback decides where the local HTTP server binds, which path it
+// listens on, and what redirect_uri to send to Withings.
+//
+// When callbackURL is empty: bind 127.0.0.1:0, path /callback, redirectURI
+// filled in by the caller once the random port is known.
+//
+// When callbackURL is non-empty: search for an embedded http://localhost or
+// http://127.0.0.1 URL (as used by the redirectmeto.com workaround). If found,
+// the local server binds to its host:port and serves its path; the full
+// callbackURL is passed verbatim as redirectURI. If the callbackURL itself
+// is an http://localhost URL, it's used directly.
+func resolveCallback(callbackURL string) (bindAddr, path, redirectURI string, err error) {
+	if callbackURL == "" {
+		return "127.0.0.1:0", "/callback", "", nil
+	}
+
+	local := extractLocalURL(callbackURL)
+	if local == nil {
+		return "", "", "", fmt.Errorf(
+			"WITHINGS_CALLBACK_URL %q has no embedded http://localhost:PORT/PATH "+
+				"— either use a localhost URL directly or wrap one via redirectmeto.com",
+			callbackURL)
+	}
+
+	host := local.Host
+	if !strings.Contains(host, ":") {
+		return "", "", "", fmt.Errorf("callback URL %q must include an explicit port", local.String())
+	}
+	p := local.Path
+	if p == "" {
+		p = "/"
+	}
+	return host, p, callbackURL, nil
+}
+
+// extractLocalURL returns the last http://localhost or http://127.0.0.1 URL
+// embedded in s, or nil if none found.
+func extractLocalURL(s string) *url.URL {
+	for _, marker := range []string{"http://localhost:", "http://127.0.0.1:"} {
+		if idx := strings.LastIndex(s, marker); idx >= 0 {
+			u, err := url.Parse(s[idx:])
+			if err == nil && u.Host != "" {
+				return u
+			}
+		}
+	}
+	return nil
 }

@@ -35,7 +35,7 @@ type activityDay struct {
 
 type activityResponse struct {
 	Activities []activityDay `json:"activities"`
-	More       int           `json:"more"`
+	More       bool          `json:"more"`
 	Offset     int           `json:"offset"`
 }
 
@@ -70,7 +70,7 @@ var activityCmd = &cobra.Command{
 				return err
 			}
 			all = append(all, resp.Activities...)
-			if resp.More == 0 {
+			if !resp.More {
 				break
 			}
 			params.Set("offset", strconv.Itoa(resp.Offset))
