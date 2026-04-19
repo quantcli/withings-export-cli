@@ -1,0 +1,50 @@
+version: 2
+
+builds:
+  - binary: withings-export
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+
+archives:
+  - formats:
+      - zip
+    name_template: "withings-export_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+homebrew_casks:
+  - name: withings-export
+    repository:
+      owner: quantcli
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Casks
+    homepage: https://github.com/quantcli/withings-export-cli
+    description: CLI to export health data from Withings (scales, watches, activity, sleep)
+    license: MIT
+    url:
+      verified: github.com/quantcli/withings-export-cli
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/withings-export"]
+          end
+
+release:
+  draft: true
+  replace_existing_draft: true
+  replace_existing_artifacts: true
