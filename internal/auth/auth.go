@@ -178,7 +178,7 @@ func exchangeCode(code, redirectURI, clientID, clientSecret string) error {
 		AccessToken:  resp.AccessToken,
 		RefreshToken: resp.RefreshToken,
 		ExpiresAt:    time.Now().Add(time.Duration(resp.ExpiresIn) * time.Second).Add(-5 * time.Minute),
-		UserID:       resp.UserID,
+		UserID:       resp.UserID.String(),
 		ClientID:     clientID,
 		ClientSecret: clientSecret,
 	}
@@ -201,19 +201,19 @@ func refresh(store *TokenStore) error {
 	store.AccessToken = resp.AccessToken
 	store.RefreshToken = resp.RefreshToken
 	store.ExpiresAt = time.Now().Add(time.Duration(resp.ExpiresIn) * time.Second).Add(-5 * time.Minute)
-	if resp.UserID != "" {
-		store.UserID = resp.UserID
+	if resp.UserID.String() != "" {
+		store.UserID = resp.UserID.String()
 	}
 	return save(store)
 }
 
 type tokenResponse struct {
-	UserID       string `json:"userid"`
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
-	ExpiresIn    int    `json:"expires_in"`
-	Scope        string `json:"scope"`
-	TokenType    string `json:"token_type"`
+	UserID       json.Number `json:"userid"`
+	AccessToken  string      `json:"access_token"`
+	RefreshToken string      `json:"refresh_token"`
+	ExpiresIn    int         `json:"expires_in"`
+	Scope        string      `json:"scope"`
+	TokenType    string      `json:"token_type"`
 }
 
 func postToken(form url.Values, out *tokenResponse) error {
