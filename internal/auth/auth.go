@@ -21,8 +21,10 @@ import (
 const (
 	authURL  = "https://account.withings.com/oauth2_user/authorize2"
 	tokenURL = "https://wbsapi.withings.net/v2/oauth2"
-	// Scopes covered by the subcommands: measurements, activity, sleep, workouts.
-	scope = "user.metrics,user.activity,user.sleepevents"
+	// user.activity covers activity, intraday, workouts, and sleep endpoints.
+	// user.metrics covers measurements and heart-rate endpoints.
+	// user.info covers device listing. user.sleepevents is webhook-only and unused here.
+	scope = "user.info,user.metrics,user.activity"
 )
 
 // TokenStore is persisted to ~/.config/withings-export/auth.json.
