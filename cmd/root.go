@@ -23,4 +23,5 @@ func init() {
 	rootCmd.AddCommand(sleepCmd)
 	rootCmd.AddCommand(activityCmd)
 	rootCmd.AddCommand(workoutsCmd)
+	rootCmd.AddCommand(intradayCmd)
 }
