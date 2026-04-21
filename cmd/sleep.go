@@ -21,6 +21,9 @@ type sleepSeries struct {
 	EndDate   int64           `json:"enddate"`
 	Date      string          `json:"date"`
 	Data      json.RawMessage `json:"data"`
+	// Source is synthetic (not from API): "summary" for getsummary rows,
+	// "derived" for rows polyfilled from intraday samples via --derive.
+	Source string `json:"source"`
 }
 
 type sleepResponse struct {
@@ -30,8 +33,9 @@ type sleepResponse struct {
 }
 
 var (
-	sleepJSONFlag  bool
-	sleepSinceFlag string
+	sleepJSONFlag   bool
+	sleepSinceFlag  string
+	sleepDeriveFlag bool
 )
 
 var sleepCmd = &cobra.Command{
@@ -69,6 +73,36 @@ var sleepCmd = &cobra.Command{
 			params.Set("offset", strconv.Itoa(resp.Offset))
 		}
 
+		haveDate := make(map[string]bool, len(all))
+		for i := range all {
+			all[i].Source = "summary"
+			haveDate[all[i].Date] = true
+		}
+
+		if sleepDeriveFlag {
+			today := time.Now()
+			first := true
+			for d := since; !d.After(today); d = d.AddDate(0, 0, 1) {
+				dateStr := d.Format("2006-01-02")
+				if haveDate[dateStr] {
+					continue
+				}
+				// Throttle — Withings rate-limits aggressive callers (status 601).
+				// 250ms between calls keeps a wide window-derive under the cap.
+				if !first {
+					time.Sleep(250 * time.Millisecond)
+				}
+				first = false
+				derived, err := deriveSleep(c, d)
+				if err != nil {
+					return err
+				}
+				if derived != nil {
+					all = append(all, *derived)
+				}
+			}
+		}
+
 		sort.Slice(all, func(i, j int) bool { return all[i].StartDate < all[j].StartDate })
 
 		if sleepJSONFlag {
@@ -76,6 +110,129 @@ var sleepCmd = &cobra.Command{
 		}
 		return writeSleepCSV(all)
 	},
+}
+
+// deriveSleep polyfills a sleep start/end for a night that has no getsummary
+// record, by finding the longest contiguous "quiet" run of intraday samples.
+//
+// Window: prior-day 18:00 local → current-day 12:00 local (18h — fits in one
+// 24h getintradayactivity call). A sample is "quiet" when heart_rate is
+// present, ≤ 80 bpm, and steps == 0. Runs tolerate gaps ≤ 60 min between
+// consecutive quiet samples (watch off for charging). The longest qualifying
+// run ≥ 3h becomes the derived sleep session. Returns (nil, nil) when no
+// window qualifies or intraday has no samples.
+func deriveSleep(c *client.Client, date time.Time) (*sleepSeries, error) {
+	loc := time.Local
+	day := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, loc)
+	winStart := day.AddDate(0, 0, -1).Add(18 * time.Hour)
+	winEnd := day.Add(12 * time.Hour)
+
+	params := url.Values{}
+	params.Set("action", "getintradayactivity")
+	params.Set("startdate", strconv.FormatInt(winStart.Unix(), 10))
+	params.Set("enddate", strconv.FormatInt(winEnd.Unix(), 10))
+	params.Set("data_fields", "steps,heart_rate,duration")
+
+	var resp intradayResponse
+	if err := c.Call("/v2/measure", params, &resp); err != nil {
+		return nil, err
+	}
+
+	type sample struct {
+		ts    int64
+		hr    int
+		steps int
+	}
+	samples := make([]sample, 0, len(resp.Series))
+	for tsStr, p := range resp.Series {
+		ts, err := strconv.ParseInt(tsStr, 10, 64)
+		if err != nil {
+			continue
+		}
+		samples = append(samples, sample{ts: ts, hr: p.HeartRate, steps: p.Steps})
+	}
+	sort.Slice(samples, func(i, j int) bool { return samples[i].ts < samples[j].ts })
+	if len(samples) == 0 {
+		return nil, nil
+	}
+
+	const maxGap int64 = 60 * 60  // 60 min — tolerate watch-off-for-charging
+	const minDur int64 = 3 * 3600 // 3h — ignore naps, noise
+
+	isQuiet := func(s sample) bool { return s.hr > 0 && s.hr <= 80 && s.steps == 0 }
+
+	var bestStart, bestEnd, bestDur int64
+	var bestHRSum, bestHRCount int
+
+	var runStart, runEnd, lastTS int64
+	var runHRSum, runHRCount int
+	inRun := false
+
+	closeRun := func() {
+		dur := runEnd - runStart
+		if dur > bestDur {
+			bestDur = dur
+			bestStart = runStart
+			bestEnd = runEnd
+			bestHRSum = runHRSum
+			bestHRCount = runHRCount
+		}
+	}
+
+	for _, s := range samples {
+		switch {
+		case isQuiet(s) && !inRun:
+			runStart, runEnd = s.ts, s.ts
+			runHRSum, runHRCount = s.hr, 1
+			inRun = true
+		case isQuiet(s) && s.ts-lastTS > maxGap:
+			closeRun()
+			runStart, runEnd = s.ts, s.ts
+			runHRSum, runHRCount = s.hr, 1
+		case isQuiet(s):
+			runEnd = s.ts
+			runHRSum += s.hr
+			runHRCount++
+		default:
+			if inRun {
+				closeRun()
+				inRun = false
+			}
+		}
+		if isQuiet(s) {
+			lastTS = s.ts
+		}
+	}
+	if inRun {
+		closeRun()
+	}
+
+	if bestDur < minDur {
+		return nil, nil
+	}
+
+	hrAvg := 0.0
+	if bestHRCount > 0 {
+		hrAvg = float64(bestHRSum) / float64(bestHRCount)
+	}
+
+	// Stuff total duration into lightsleepduration so the existing CSV writer's
+	// total_sleep_min = (light+deep+rem)/60 renders correctly. Derived rows
+	// have no stage breakdown, so all sleep time shows as "light".
+	dataObj := map[string]any{
+		"lightsleepduration": bestDur,
+		"hr_average":         hrAvg,
+	}
+	data, _ := json.Marshal(dataObj)
+
+	return &sleepSeries{
+		Timezone:  loc.String(),
+		StartDate: bestStart,
+		EndDate:   bestEnd,
+		Date:      date.Format("2006-01-02"),
+		Data:      json.RawMessage(data),
+		Source:    "derived",
+	}, nil
 }
 
 func writeSleepCSV(series []sleepSeries) error {
@@ -87,6 +244,7 @@ func writeSleepCSV(series []sleepSeries) error {
 		"time_to_sleep_sec", "time_to_wakeup_sec", "wakeup_count",
 		"sleep_score", "hr_avg", "hr_min", "hr_max",
 		"rr_avg", "rr_min", "rr_max", "snore_episodes", "apnea_hypopnea_index",
+		"source",
 	}
 	if err := w.Write(header); err != nil {
 		return err
@@ -138,6 +296,7 @@ func writeSleepCSV(series []sleepSeries) error {
 			strconv.FormatFloat(d.RRMax, 'f', -1, 64),
 			strconv.Itoa(d.SnoreEpisodes),
 			strconv.FormatFloat(d.ApneaHypopnea, 'f', -1, 64),
+			s.Source,
 		}
 		if err := w.Write(row); err != nil {
 			return err
@@ -151,4 +310,6 @@ func init() {
 		"Filter on or after date (e.g. 2026-01-01, 30d, 4w, 6m, 1y; default 30d)")
 	sleepCmd.Flags().BoolVar(&sleepJSONFlag, "json", false,
 		"Output as JSON instead of CSV")
+	sleepCmd.Flags().BoolVar(&sleepDeriveFlag, "derive", false,
+		"For nights with no Withings sleep summary, polyfill start/end from intraday heart-rate samples")
 }
