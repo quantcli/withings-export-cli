@@ -156,65 +156,96 @@ func deriveSleep(c *client.Client, date time.Time) (*sleepSeries, error) {
 		return nil, nil
 	}
 
-	const maxGap int64 = 60 * 60  // 60 min — tolerate watch-off-for-charging
-	const minDur int64 = 3 * 3600 // 3h — ignore naps, noise
+	// A sample "breaks" a sleep run when it shows real wakefulness: elevated
+	// heart rate, or a meaningful burst of steps. Small step samples (bathroom
+	// trips, rolling over) do not break the run — they're just HealthKit's way
+	// of reporting brief motion without an accompanying HR reading.
+	const hrBreak = 90  // bpm above this = awake/active
+	const stepsBreak = 30
 
-	isQuiet := func(s sample) bool { return s.hr > 0 && s.hr <= 80 && s.steps == 0 }
+	const maxGap int64 = 90 * 60  // 90 min — tolerate watch-off-for-charging
+	const minDur int64 = 3 * 3600 // 3h — ignore naps
 
-	var bestStart, bestEnd, bestDur int64
-	var bestHRSum, bestHRCount int
+	isBreak := func(s sample) bool { return s.hr > hrBreak || s.steps > stepsBreak }
 
-	var runStart, runEnd, lastTS int64
-	var runHRSum, runHRCount int
+	type run struct {
+		start, end int64
+		hrSum      int
+		hrCount    int
+	}
+	var runs []run
+	var cur run
 	inRun := false
+	var lastTS int64
 
-	closeRun := func() {
-		dur := runEnd - runStart
-		if dur > bestDur {
-			bestDur = dur
-			bestStart = runStart
-			bestEnd = runEnd
-			bestHRSum = runHRSum
-			bestHRCount = runHRCount
+	startRun := func(s sample) {
+		cur = run{start: s.ts, end: s.ts}
+		if s.hr > 0 {
+			cur.hrSum = s.hr
+			cur.hrCount = 1
 		}
+		inRun = true
+	}
+	extendRun := func(s sample) {
+		cur.end = s.ts
+		if s.hr > 0 {
+			cur.hrSum += s.hr
+			cur.hrCount++
+		}
+	}
+	flushRun := func() {
+		runs = append(runs, cur)
+		inRun = false
 	}
 
 	for _, s := range samples {
-		switch {
-		case isQuiet(s) && !inRun:
-			runStart, runEnd = s.ts, s.ts
-			runHRSum, runHRCount = s.hr, 1
-			inRun = true
-		case isQuiet(s) && s.ts-lastTS > maxGap:
-			closeRun()
-			runStart, runEnd = s.ts, s.ts
-			runHRSum, runHRCount = s.hr, 1
-		case isQuiet(s):
-			runEnd = s.ts
-			runHRSum += s.hr
-			runHRCount++
-		default:
+		if isBreak(s) {
 			if inRun {
-				closeRun()
-				inRun = false
+				flushRun()
 			}
+			continue
 		}
-		if isQuiet(s) {
-			lastTS = s.ts
+		switch {
+		case !inRun:
+			startRun(s)
+		case s.ts-lastTS > maxGap:
+			flushRun()
+			startRun(s)
+		default:
+			extendRun(s)
 		}
+		lastTS = s.ts
 	}
 	if inRun {
-		closeRun()
+		flushRun()
 	}
 
-	if bestDur < minDur {
+	// Accept the longest run that looks like sleep: ≥ 3h, with enough HR data
+	// to confirm it's not just "watch not worn," and a mean HR in the sleep range.
+	var best *run
+	for i := range runs {
+		r := &runs[i]
+		if r.end-r.start < minDur {
+			continue
+		}
+		if r.hrCount < 10 {
+			continue
+		}
+		if float64(r.hrSum)/float64(r.hrCount) > 80 {
+			continue
+		}
+		if best == nil || r.end-r.start > best.end-best.start {
+			best = r
+		}
+	}
+	if best == nil {
 		return nil, nil
 	}
 
-	hrAvg := 0.0
-	if bestHRCount > 0 {
-		hrAvg = float64(bestHRSum) / float64(bestHRCount)
-	}
+	bestStart := best.start
+	bestEnd := best.end
+	bestDur := best.end - best.start
+	hrAvg := float64(best.hrSum) / float64(best.hrCount)
 
 	// Stuff total duration into lightsleepduration so the existing CSV writer's
 	// total_sleep_min = (light+deep+rem)/60 renders correctly. Derived rows
