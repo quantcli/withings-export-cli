@@ -163,8 +163,8 @@ func writeWorkoutsCSV(series []workoutSeries) error {
 		}
 		_ = json.Unmarshal(s.Data, &d)
 
-		start := time.Unix(s.StartDate, 0).UTC()
-		end := time.Unix(s.EndDate, 0).UTC()
+		start := time.Unix(s.StartDate, 0).Local()
+		end := time.Unix(s.EndDate, 0).Local()
 		category := workoutCategoryNames[s.Category]
 		if category == "" {
 			category = "unknown"

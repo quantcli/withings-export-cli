@@ -129,7 +129,7 @@ func writeIntradayCSV(samples []intradaySample) error {
 	w := csv.NewWriter(os.Stdout)
 	defer w.Flush()
 	header := []string{
-		"timestamp", "datetime_utc", "duration_sec",
+		"timestamp", "datetime", "duration_sec",
 		"steps", "distance_m", "elevation_m", "calories",
 		"heart_rate", "hrv_rmssd", "hrv_sdnn1", "hrv_quality", "spo2_auto",
 		"model", "model_id",
@@ -140,7 +140,7 @@ func writeIntradayCSV(samples []intradaySample) error {
 	for _, s := range samples {
 		row := []string{
 			strconv.FormatInt(s.Timestamp, 10),
-			time.Unix(s.Timestamp, 0).UTC().Format(time.RFC3339),
+			time.Unix(s.Timestamp, 0).Local().Format(time.RFC3339),
 			strconv.Itoa(s.Duration),
 			strconv.Itoa(s.Steps),
 			strconv.FormatFloat(s.Distance, 'f', -1, 64),
