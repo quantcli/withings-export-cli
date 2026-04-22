@@ -101,7 +101,7 @@ var measurementsCmd = &cobra.Command{
 				return err
 			}
 			for _, g := range resp.Measuregrps {
-				t := time.Unix(g.Date, 0).UTC()
+				t := time.Unix(g.Date, 0).Local()
 				for _, m := range g.Measures {
 					value := float64(m.Value) * math.Pow10(m.Unit)
 					name, ok := measureTypeNames[m.Type]

@@ -302,8 +302,8 @@ func writeSleepCSV(series []sleepSeries) error {
 		}
 		_ = json.Unmarshal(s.Data, &d)
 
-		start := time.Unix(s.StartDate, 0).UTC()
-		end := time.Unix(s.EndDate, 0).UTC()
+		start := time.Unix(s.StartDate, 0).Local()
+		end := time.Unix(s.EndDate, 0).Local()
 		totalSleepMin := (d.Light + d.Deep + d.REM) / 60
 
 		row := []string{
