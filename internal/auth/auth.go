@@ -267,6 +267,13 @@ func load() (*TokenStore, error) {
 	return &store, nil
 }
 
+// Load reads the saved token store without attempting a refresh. Returns
+// (nil, error) when no token has been saved yet. Suitable for non-mutating
+// status checks; use GetToken when an action needs a usable access token.
+func Load() (*TokenStore, error) {
+	return load()
+}
+
 func openBrowser(target string) error {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
