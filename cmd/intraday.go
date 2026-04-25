@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/csv"
+	"fmt"
 	"net/url"
 	"os"
 	"sort"
@@ -51,8 +52,8 @@ type intradayResponse struct {
 }
 
 var (
-	intradayJSONFlag  bool
-	intradaySinceFlag string
+	intradayFormatFlag string
+	intradaySinceFlag  string
 )
 
 var intradayCmd = &cobra.Command{
@@ -118,10 +119,18 @@ Default window is the last 24h — intraday is dense; wider ranges are slow.`,
 
 		sort.Slice(all, func(i, j int) bool { return all[i].Timestamp < all[j].Timestamp })
 
-		if intradayJSONFlag {
-			return printJSON(all)
+		format, err := validateFormat(intradayFormatFlag)
+		if err != nil {
+			return err
 		}
-		return writeIntradayCSV(all)
+		switch format {
+		case "json":
+			return printJSON(all)
+		case "csv":
+			return writeIntradayCSV(all)
+		default:
+			return writeIntradayMarkdown(all)
+		}
 	},
 }
 
@@ -161,9 +170,51 @@ func writeIntradayCSV(samples []intradaySample) error {
 	return nil
 }
 
+// writeIntradayMarkdown emits one fitdown-style "Intraday DATE" block per
+// local day, with one line per sample carrying only the fields that have
+// values. Suppressing zero fields keeps the firehose readable.
+func writeIntradayMarkdown(samples []intradaySample) error {
+	var lastDate string
+	for _, s := range samples {
+		ts := time.Unix(s.Timestamp, 0).Local()
+		date := ts.Format("2006-01-02")
+		if date != lastDate {
+			if lastDate != "" {
+				fmt.Fprintln(os.Stdout)
+			}
+			fmt.Fprintf(os.Stdout, "Intraday %s\n\n", date)
+			lastDate = date
+		}
+		fmt.Fprint(os.Stdout, ts.Format("15:04:05"))
+		if s.HeartRate > 0 {
+			fmt.Fprintf(os.Stdout, " HR %d", s.HeartRate)
+		}
+		if s.RMSSD > 0 {
+			fmt.Fprintf(os.Stdout, " rmssd %s", fmtNum(s.RMSSD))
+		}
+		if s.SDNN1 > 0 {
+			fmt.Fprintf(os.Stdout, " sdnn1 %s", fmtNum(s.SDNN1))
+		}
+		if s.SpO2 > 0 {
+			fmt.Fprintf(os.Stdout, " spo2 %s", fmtNum(s.SpO2))
+		}
+		if s.Steps > 0 {
+			fmt.Fprintf(os.Stdout, " %d steps", s.Steps)
+		}
+		if s.Distance > 0 {
+			fmt.Fprintf(os.Stdout, " %sm", fmtNum(s.Distance))
+		}
+		if s.Calories > 0 {
+			fmt.Fprintf(os.Stdout, " %s cal", fmtNum(s.Calories))
+		}
+		fmt.Fprintln(os.Stdout)
+	}
+	return nil
+}
+
 func init() {
 	intradayCmd.Flags().StringVar(&intradaySinceFlag, "since", "",
 		"Filter on or after date (e.g. 2026-04-15, 1d, 4w, 6m; default 1d)")
-	intradayCmd.Flags().BoolVar(&intradayJSONFlag, "json", false,
-		"Output as JSON instead of CSV")
+	intradayCmd.Flags().StringVar(&intradayFormatFlag, "format", "markdown",
+		"Output format: markdown (default, fitdown-style), json, or csv")
 }

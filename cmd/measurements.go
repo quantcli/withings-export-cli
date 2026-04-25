@@ -70,9 +70,9 @@ type measurementRow struct {
 }
 
 var (
-	measurementsJSONFlag  bool
-	measurementsSinceFlag string
-	measurementsTypesFlag string
+	measurementsFormatFlag string
+	measurementsSinceFlag  string
+	measurementsTypesFlag  string
 )
 
 var measurementsCmd = &cobra.Command{
@@ -126,10 +126,18 @@ var measurementsCmd = &cobra.Command{
 
 		sort.Slice(rows, func(i, j int) bool { return rows[i].Date.Before(rows[j].Date) })
 
-		if measurementsJSONFlag {
-			return printJSON(rows)
+		format, err := validateFormat(measurementsFormatFlag)
+		if err != nil {
+			return err
 		}
-		return writeMeasurementsCSV(rows)
+		switch format {
+		case "json":
+			return printJSON(rows)
+		case "csv":
+			return writeMeasurementsCSV(rows)
+		default:
+			return writeMeasurementsMarkdown(rows)
+		}
 	},
 }
 
@@ -154,11 +162,57 @@ func writeMeasurementsCSV(rows []measurementRow) error {
 	return nil
 }
 
+// fmtMeasurement renders a measurement value with up to 3 decimal places,
+// stripping float-precision noise (e.g. 107.35000000000001 → 107.35).
+func fmtMeasurement(v float64) string {
+	s := strconv.FormatFloat(v, 'f', 3, 64)
+	// trim trailing zeros and trailing dot
+	for len(s) > 0 && s[len(s)-1] == '0' {
+		s = s[:len(s)-1]
+	}
+	if len(s) > 0 && s[len(s)-1] == '.' {
+		s = s[:len(s)-1]
+	}
+	return s
+}
+
+// writeMeasurementsMarkdown emits one fitdown-style block per measurement
+// group (a single weigh-in event), with one line per measure type.
+func writeMeasurementsMarkdown(rows []measurementRow) error {
+	type group struct {
+		date time.Time
+		rows []measurementRow
+	}
+	groups := map[int64]*group{}
+	var order []int64
+	for _, r := range rows {
+		g, ok := groups[r.GrpID]
+		if !ok {
+			g = &group{date: r.Date}
+			groups[r.GrpID] = g
+			order = append(order, r.GrpID)
+		}
+		g.rows = append(g.rows, r)
+	}
+	sort.Slice(order, func(i, j int) bool {
+		return groups[order[i]].date.Before(groups[order[j]].date)
+	})
+	for _, id := range order {
+		g := groups[id]
+		fmt.Fprintf(os.Stdout, "Measurements %s\n\n", g.date.Format("2006-01-02 15:04"))
+		for _, r := range g.rows {
+			fmt.Fprintf(os.Stdout, "%s %s\n", r.Type, fmtMeasurement(r.Value))
+		}
+		fmt.Fprintln(os.Stdout)
+	}
+	return nil
+}
+
 func init() {
 	measurementsCmd.Flags().StringVar(&measurementsSinceFlag, "since", "",
 		"Filter on or after date (e.g. 2026-01-01, 30d, 4w, 6m, 1y; default 30d)")
-	measurementsCmd.Flags().BoolVar(&measurementsJSONFlag, "json", false,
-		"Output as JSON instead of CSV")
+	measurementsCmd.Flags().StringVar(&measurementsFormatFlag, "format", "markdown",
+		"Output format: markdown (default, fitdown-style), json, or csv")
 	measurementsCmd.Flags().StringVar(&measurementsTypesFlag, "types", "",
 		"Comma-separated measure type codes to include (e.g. 1,6,76); default is all")
 }

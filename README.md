@@ -1,6 +1,6 @@
 # withings-export-cli
 
-Export health data from [Withings](https://www.withings.com) scales, watches, and trackers. A command-line tool to back up measurements, sleep summaries, activity, and workouts — all from your terminal, with CSV or JSON output.
+Export health data from [Withings](https://www.withings.com) scales, watches, and trackers. A command-line tool to back up measurements, sleep summaries, activity, and workouts — all from your terminal, with [fitdown](https://github.com/datavis-tech/fitdown)-style markdown by default and JSON or CSV on demand.
 
 [![Latest Release](https://img.shields.io/github/v/release/quantcli/withings-export-cli)](https://github.com/quantcli/withings-export-cli/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -14,7 +14,7 @@ Export health data from [Withings](https://www.withings.com) scales, watches, an
 - **Activity** — daily steps, distance, elevation, calories, HR zones
 - **Workouts** — runs, walks, bikes, swims, etc. with duration, HR, distance, and more
 - **Date filtering** — relative (`30d`, `4w`, `6m`, `1y`) or absolute (`2026-01-01`)
-- **CSV by default, JSON with `--json`** — pipe into your tool of choice
+- **Fitdown-style markdown by default**, plus `--format json` and `--format csv` — pipe into your tool of choice
 - **Multi-platform** — pre-built binaries for macOS (Intel + Apple Silicon), Linux, and Windows
 
 ## Quick Start
@@ -107,11 +107,12 @@ withings-export auth refresh    # Force refresh and print status
 ### Measurements (scales, BP monitors, ECG)
 
 ```sh
-withings-export measurements                   # last 30 days, CSV to stdout
-withings-export measurements --since 1y        # last year
+withings-export measurements                       # last 30 days, markdown
+withings-export measurements --since 1y            # last year
 withings-export measurements --since 2026-01-01
-withings-export measurements --types 1,6,76    # only weight, body fat %, muscle mass
-withings-export measurements --json            # JSON instead of CSV
+withings-export measurements --types 1,6,76        # only weight, body fat %, muscle mass
+withings-export measurements --format json         # JSON for scripting
+withings-export measurements --format csv          # CSV for spreadsheets
 ```
 
 Common measure type codes: `1`=weight (kg), `6`=body fat %, `8`=fat mass (kg), `9`=diastolic BP, `10`=systolic BP, `11`=heart pulse, `54`=SpO₂ %, `76`=muscle mass, `77`=hydration, `88`=bone mass.
@@ -119,9 +120,11 @@ Common measure type codes: `1`=weight (kg), `6`=body fat %, `8`=fat mass (kg), `
 ### Sleep
 
 ```sh
-withings-export sleep                  # last 30 nights, CSV
+withings-export sleep                  # last 30 nights, markdown
 withings-export sleep --since 6m       # last 6 months
-withings-export sleep --json
+withings-export sleep --derive         # polyfill nights with no Withings summary
+                                       # using intraday HR samples (Apple Watch via HealthKit)
+withings-export sleep --format json
 ```
 
 Includes total sleep time, stages (light/deep/REM), sleep score, heart rate, respiratory rate, snoring episodes, and apnea-hypopnea index (if supported by your device).
@@ -129,9 +132,9 @@ Includes total sleep time, stages (light/deep/REM), sleep score, heart rate, res
 ### Activity
 
 ```sh
-withings-export activity               # last 30 days, CSV
+withings-export activity               # last 30 days, markdown
 withings-export activity --since 1y
-withings-export activity --json
+withings-export activity --format json
 ```
 
 Daily steps, distance, elevation, calories, time in HR zones.
@@ -139,22 +142,43 @@ Daily steps, distance, elevation, calories, time in HR zones.
 ### Workouts
 
 ```sh
-withings-export workouts               # last 90 days, CSV
+withings-export workouts               # last 90 days, markdown
 withings-export workouts --since 6m
-withings-export workouts --json
+withings-export workouts --format json
 ```
 
 Per-workout category (run/walk/bike/etc.), duration, calories, HR, distance, elevation.
 
-## Output Format
+### Intraday
 
-**CSV (default):** header row + one row per data point. Suitable for spreadsheets, Grafana, pandas, etc.
+```sh
+withings-export intraday               # last 24h, minute-level samples
+withings-export intraday --since 7d
+withings-export intraday --format csv
+```
 
-**JSON (`--json`):** pretty-printed JSON array. Good for `jq` or custom scripts.
+Per-minute heart rate, HRV (rmssd, sdnn1), SpO₂, steps, and distance — typically populated by an Apple Watch via the HealthKit bridge or by a native Withings tracker.
+
+## Output Formats
+
+**Markdown (default):** [fitdown](https://github.com/datavis-tech/fitdown)-style plain-text blocks with a date heading per record. Human-readable and easy to skim:
+
+```
+Workout 2026-04-23
+
+lift_weights
+08:58 → 10:12 (73 min)
+482 cal
+HR avg 76, 50-127
+```
+
+**JSON (`--format json`):** pretty-printed JSON array. Good for `jq` or custom scripts.
+
+**CSV (`--format csv`):** header row + one row per data point. Suitable for spreadsheets, Grafana, pandas, etc.
 
 Example — average weight over the last year:
 ```sh
-withings-export measurements --since 1y --types 1 --json \
+withings-export measurements --since 1y --types 1 --format json \
   | jq '[.[] | .value] | add / length'
 ```
 
