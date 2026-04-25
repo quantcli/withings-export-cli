@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -57,4 +58,50 @@ func printJSON(v any) error {
 		return fmt.Errorf("failed to encode output: %w", err)
 	}
 	return nil
+}
+
+// validateFormat checks that --format is one of the supported choices and
+// normalizes it to a canonical lowercase value.
+func validateFormat(format string) (string, error) {
+	switch format {
+	case "", "markdown", "md":
+		return "markdown", nil
+	case "json":
+		return "json", nil
+	case "csv":
+		return "csv", nil
+	default:
+		return "", fmt.Errorf("unknown --format %q (use markdown, json, or csv)", format)
+	}
+}
+
+// fmtDur renders seconds as a fitdown-friendly duration: "8h04", "47 min",
+// or "0 min" for zero. Negative values render as empty.
+func fmtDur(seconds int) string {
+	if seconds < 0 {
+		return ""
+	}
+	h := seconds / 3600
+	m := (seconds % 3600) / 60
+	if h > 0 {
+		return fmt.Sprintf("%dh%02d", h, m)
+	}
+	return fmt.Sprintf("%d min", m)
+}
+
+// fmtNum trims trailing zeros from a float for human-readable output.
+func fmtNum(v float64) string {
+	return strconv.FormatFloat(v, 'f', -1, 64)
+}
+
+// fmtRound rounds a float to the nearest integer. Used in markdown output for
+// values where the API returns trailing-precision noise (HR, calories).
+func fmtRound(v float64) string {
+	return fmt.Sprintf("%.0f", v)
+}
+
+// fmtFloat1 renders a float with one decimal place — useful for HR averages
+// where ~10ths of a bpm carry a little signal but full precision is noise.
+func fmtFloat1(v float64) string {
+	return fmt.Sprintf("%.1f", v)
 }

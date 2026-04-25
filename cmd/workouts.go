@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/csv"
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"os"
 	"sort"
@@ -85,8 +86,8 @@ type workoutsResponse struct {
 }
 
 var (
-	workoutsJSONFlag  bool
-	workoutsSinceFlag string
+	workoutsFormatFlag string
+	workoutsSinceFlag  string
 )
 
 var workoutsCmd = &cobra.Command{
@@ -125,10 +126,18 @@ var workoutsCmd = &cobra.Command{
 
 		sort.Slice(all, func(i, j int) bool { return all[i].StartDate < all[j].StartDate })
 
-		if workoutsJSONFlag {
-			return printJSON(all)
+		format, err := validateFormat(workoutsFormatFlag)
+		if err != nil {
+			return err
 		}
-		return writeWorkoutsCSV(all)
+		switch format {
+		case "json":
+			return printJSON(all)
+		case "csv":
+			return writeWorkoutsCSV(all)
+		default:
+			return writeWorkoutsMarkdown(all)
+		}
 	},
 }
 
@@ -199,9 +208,65 @@ func writeWorkoutsCSV(series []workoutSeries) error {
 	return nil
 }
 
+// writeWorkoutsMarkdown emits one fitdown-style block per workout: a
+// "Workout DATE" heading, the activity name, then concise stat lines. The
+// shape mirrors fitdown's own examples (Workout … / category / details).
+func writeWorkoutsMarkdown(series []workoutSeries) error {
+	for _, s := range series {
+		var d struct {
+			Calories    float64 `json:"calories"`
+			EffDuration int     `json:"effduration"`
+			Distance    float64 `json:"distance"`
+			Elevation   float64 `json:"elevation"`
+			Steps       int     `json:"steps"`
+			HRAvg       float64 `json:"hr_average"`
+			HRMin       float64 `json:"hr_min"`
+			HRMax       float64 `json:"hr_max"`
+			HRZone0     int     `json:"hr_zone_0"`
+			HRZone1     int     `json:"hr_zone_1"`
+			HRZone2     int     `json:"hr_zone_2"`
+			HRZone3     int     `json:"hr_zone_3"`
+		}
+		_ = json.Unmarshal(s.Data, &d)
+
+		start := time.Unix(s.StartDate, 0).Local()
+		end := time.Unix(s.EndDate, 0).Local()
+		category := workoutCategoryNames[s.Category]
+		if category == "" {
+			category = "unknown"
+		}
+
+		fmt.Fprintf(os.Stdout, "Workout %s\n\n", s.Date)
+		fmt.Fprintf(os.Stdout, "%s\n", category)
+		fmt.Fprintf(os.Stdout, "%s → %s (%d min)\n",
+			start.Format("15:04"), end.Format("15:04"),
+			int(end.Sub(start).Minutes()))
+		if d.Calories > 0 {
+			fmt.Fprintf(os.Stdout, "%s cal\n", fmtRound(d.Calories))
+		}
+		if d.HRAvg > 0 {
+			fmt.Fprintf(os.Stdout, "HR avg %s, %s-%s\n", fmtRound(d.HRAvg), fmtRound(d.HRMin), fmtRound(d.HRMax))
+		}
+		if d.Steps > 0 {
+			if d.Distance > 0 {
+				fmt.Fprintf(os.Stdout, "%d steps, %s m\n", d.Steps, fmtRound(d.Distance))
+			} else {
+				fmt.Fprintf(os.Stdout, "%d steps\n", d.Steps)
+			}
+		} else if d.Distance > 0 {
+			fmt.Fprintf(os.Stdout, "%s m\n", fmtRound(d.Distance))
+		}
+		if d.Elevation > 0 {
+			fmt.Fprintf(os.Stdout, "%s m elevation\n", fmtRound(d.Elevation))
+		}
+		fmt.Fprintln(os.Stdout)
+	}
+	return nil
+}
+
 func init() {
 	workoutsCmd.Flags().StringVar(&workoutsSinceFlag, "since", "",
 		"Filter on or after date (e.g. 2026-01-01, 30d, 4w, 6m, 1y; default 90d)")
-	workoutsCmd.Flags().BoolVar(&workoutsJSONFlag, "json", false,
-		"Output as JSON instead of CSV")
+	workoutsCmd.Flags().StringVar(&workoutsFormatFlag, "format", "markdown",
+		"Output format: markdown (default, fitdown-style), json, or csv")
 }

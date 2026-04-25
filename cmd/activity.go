@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/csv"
+	"fmt"
 	"net/url"
 	"os"
 	"sort"
@@ -40,8 +41,8 @@ type activityResponse struct {
 }
 
 var (
-	activityJSONFlag  bool
-	activitySinceFlag string
+	activityFormatFlag string
+	activitySinceFlag  string
 )
 
 var activityCmd = &cobra.Command{
@@ -78,10 +79,18 @@ var activityCmd = &cobra.Command{
 
 		sort.Slice(all, func(i, j int) bool { return all[i].Date < all[j].Date })
 
-		if activityJSONFlag {
-			return printJSON(all)
+		format, err := validateFormat(activityFormatFlag)
+		if err != nil {
+			return err
 		}
-		return writeActivityCSV(all)
+		switch format {
+		case "json":
+			return printJSON(all)
+		case "csv":
+			return writeActivityCSV(all)
+		default:
+			return writeActivityMarkdown(all)
+		}
 	},
 }
 
@@ -126,9 +135,35 @@ func writeActivityCSV(days []activityDay) error {
 	return nil
 }
 
+// writeActivityMarkdown emits one fitdown-style block per day. Empty/zero
+// fields are dropped to keep output tight.
+func writeActivityMarkdown(days []activityDay) error {
+	for _, d := range days {
+		fmt.Fprintf(os.Stdout, "Activity %s\n\n", d.Date)
+		if d.Steps > 0 || d.Distance > 0 {
+			fmt.Fprintf(os.Stdout, "%d steps, %.2f km\n", d.Steps, d.Distance/1000)
+		}
+		if d.Calories > 0 || d.TotalCalories > 0 {
+			fmt.Fprintf(os.Stdout, "%s cal active, %s total\n", fmtRound(d.Calories), fmtRound(d.TotalCalories))
+		}
+		if d.HRAvg > 0 {
+			fmt.Fprintf(os.Stdout, "HR avg %s, %s-%s\n", fmtRound(d.HRAvg), fmtRound(d.HRMin), fmtRound(d.HRMax))
+		}
+		if d.Active > 0 {
+			fmt.Fprintf(os.Stdout, "Active %s — %s soft, %s moderate, %s intense\n",
+				fmtDur(d.Active), fmtDur(d.Soft), fmtDur(d.Moderate), fmtDur(d.Intense))
+		}
+		if d.Elevation > 0 {
+			fmt.Fprintf(os.Stdout, "%s m elevation\n", fmtRound(d.Elevation))
+		}
+		fmt.Fprintln(os.Stdout)
+	}
+	return nil
+}
+
 func init() {
 	activityCmd.Flags().StringVar(&activitySinceFlag, "since", "",
 		"Filter on or after date (e.g. 2026-01-01, 30d, 4w, 6m, 1y; default 30d)")
-	activityCmd.Flags().BoolVar(&activityJSONFlag, "json", false,
-		"Output as JSON instead of CSV")
+	activityCmd.Flags().StringVar(&activityFormatFlag, "format", "markdown",
+		"Output format: markdown (default, fitdown-style), json, or csv")
 }
