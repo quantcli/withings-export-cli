@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -108,6 +109,12 @@ func untilDayOrToday(s string) (time.Time, error) {
 }
 
 func printJSON(v any) error {
+	// A nil slice marshals as "null"; force "[]" so empty windows match the
+	// prime contract (and don't blow up jq pipelines).
+	if rv := reflect.ValueOf(v); rv.Kind() == reflect.Slice && rv.IsNil() {
+		_, err := os.Stdout.WriteString("[]\n")
+		return err
+	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(v); err != nil {

@@ -135,9 +135,11 @@ GOTCHAS
     (250ms between calls); ad-hoc loops should do the same.
   - Sleep score and apnea fields are populated only on supported devices.
     'data.sleep_score' is null on unsupported wakeup-light models.
-  - 'workouts' category codes are integers; common ones are mapped to
-    string names (walk/run/bicycling/...) but unknown codes pass through
-    as 'unknown' with the numeric category_code preserved.
+  - 'workouts' category is a Withings integer code in JSON (1=walk,
+    2=run, 6=bicycling, 16=lift_weights, ...).  Markdown and CSV map
+    common codes to string names ('lift_weights', 'walk', ...) and
+    unknown codes render as 'unknown'; CSV also keeps the raw integer
+    in a 'category_code' column.
 `
 
 var primeCmd = &cobra.Command{
