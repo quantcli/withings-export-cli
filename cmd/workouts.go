@@ -88,6 +88,7 @@ type workoutsResponse struct {
 var (
 	workoutsFormatFlag string
 	workoutsSinceFlag  string
+	workoutsUntilFlag  string
 )
 
 var workoutsCmd = &cobra.Command{
@@ -95,6 +96,10 @@ var workoutsCmd = &cobra.Command{
 	Short: "Export workouts (runs, walks, bikes, etc.)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		since, err := sinceOrDefault(workoutsSinceFlag, 90)
+		if err != nil {
+			return err
+		}
+		until, err := untilDayOrToday(workoutsUntilFlag)
 		if err != nil {
 			return err
 		}
@@ -107,7 +112,7 @@ var workoutsCmd = &cobra.Command{
 		params := url.Values{}
 		params.Set("action", "getworkouts")
 		params.Set("startdateymd", since.Format("2006-01-02"))
-		params.Set("enddateymd", time.Now().Format("2006-01-02"))
+		params.Set("enddateymd", until.Format("2006-01-02"))
 		params.Set("data_fields", dataFields)
 
 		c := client.New()
@@ -266,7 +271,9 @@ func writeWorkoutsMarkdown(series []workoutSeries) error {
 
 func init() {
 	workoutsCmd.Flags().StringVar(&workoutsSinceFlag, "since", "",
-		"Filter on or after date (e.g. 2026-01-01, 30d, 4w, 6m, 1y; default 90d)")
+		"Filter on or after date (today, yesterday, YYYY-MM-DD, or Nd/Nw/Nm/Ny; default 90d)")
+	workoutsCmd.Flags().StringVar(&workoutsUntilFlag, "until", "",
+		"Filter through date, inclusive (today, yesterday, YYYY-MM-DD, or Nd/Nw/Nm/Ny; default today)")
 	workoutsCmd.Flags().StringVar(&workoutsFormatFlag, "format", "markdown",
 		"Output format: markdown (default, fitdown-style), json, or csv")
 }

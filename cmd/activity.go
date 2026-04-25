@@ -7,7 +7,6 @@ import (
 	"os"
 	"sort"
 	"strconv"
-	"time"
 
 	"github.com/quantcli/withings-export-cli/internal/client"
 	"github.com/spf13/cobra"
@@ -43,6 +42,7 @@ type activityResponse struct {
 var (
 	activityFormatFlag string
 	activitySinceFlag  string
+	activityUntilFlag  string
 )
 
 var activityCmd = &cobra.Command{
@@ -53,6 +53,10 @@ var activityCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		until, err := untilDayOrToday(activityUntilFlag)
+		if err != nil {
+			return err
+		}
 
 		dataFields := "steps,distance,elevation,soft,moderate,intense,active," +
 			"calories,totalcalories,hr_average,hr_min,hr_max,hr_zone_0,hr_zone_1,hr_zone_2,hr_zone_3"
@@ -60,7 +64,7 @@ var activityCmd = &cobra.Command{
 		params := url.Values{}
 		params.Set("action", "getactivity")
 		params.Set("startdateymd", since.Format("2006-01-02"))
-		params.Set("enddateymd", time.Now().Format("2006-01-02"))
+		params.Set("enddateymd", until.Format("2006-01-02"))
 		params.Set("data_fields", dataFields)
 
 		c := client.New()
@@ -163,7 +167,9 @@ func writeActivityMarkdown(days []activityDay) error {
 
 func init() {
 	activityCmd.Flags().StringVar(&activitySinceFlag, "since", "",
-		"Filter on or after date (e.g. 2026-01-01, 30d, 4w, 6m, 1y; default 30d)")
+		"Filter on or after date (today, yesterday, YYYY-MM-DD, or Nd/Nw/Nm/Ny; default 30d)")
+	activityCmd.Flags().StringVar(&activityUntilFlag, "until", "",
+		"Filter through date, inclusive (today, yesterday, YYYY-MM-DD, or Nd/Nw/Nm/Ny; default today)")
 	activityCmd.Flags().StringVar(&activityFormatFlag, "format", "markdown",
 		"Output format: markdown (default, fitdown-style), json, or csv")
 }
