@@ -36,6 +36,7 @@ type sleepResponse struct {
 var (
 	sleepFormatFlag string
 	sleepSinceFlag  string
+	sleepUntilFlag  string
 	sleepDeriveFlag bool
 )
 
@@ -44,6 +45,10 @@ var sleepCmd = &cobra.Command{
 	Short: "Export nightly sleep summaries",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		since, err := sinceOrDefault(sleepSinceFlag, 30)
+		if err != nil {
+			return err
+		}
+		until, err := untilDayOrToday(sleepUntilFlag)
 		if err != nil {
 			return err
 		}
@@ -57,7 +62,7 @@ var sleepCmd = &cobra.Command{
 		params := url.Values{}
 		params.Set("action", "getsummary")
 		params.Set("startdateymd", since.Format("2006-01-02"))
-		params.Set("enddateymd", time.Now().Format("2006-01-02"))
+		params.Set("enddateymd", until.Format("2006-01-02"))
 		params.Set("data_fields", dataFields)
 
 		c := client.New()
@@ -81,9 +86,8 @@ var sleepCmd = &cobra.Command{
 		}
 
 		if sleepDeriveFlag {
-			today := time.Now()
 			first := true
-			for d := since; !d.After(today); d = d.AddDate(0, 0, 1) {
+			for d := since; !d.After(until); d = d.AddDate(0, 0, 1) {
 				dateStr := d.Format("2006-01-02")
 				if haveDate[dateStr] {
 					continue
@@ -414,7 +418,9 @@ func writeSleepMarkdown(series []sleepSeries) error {
 
 func init() {
 	sleepCmd.Flags().StringVar(&sleepSinceFlag, "since", "",
-		"Filter on or after date (e.g. 2026-01-01, 30d, 4w, 6m, 1y; default 30d)")
+		"Filter on or after date (today, yesterday, YYYY-MM-DD, or Nd/Nw/Nm/Ny; default 30d)")
+	sleepCmd.Flags().StringVar(&sleepUntilFlag, "until", "",
+		"Filter through date, inclusive (today, yesterday, YYYY-MM-DD, or Nd/Nw/Nm/Ny; default today)")
 	sleepCmd.Flags().StringVar(&sleepFormatFlag, "format", "markdown",
 		"Output format: markdown (default, fitdown-style), json, or csv")
 	sleepCmd.Flags().BoolVar(&sleepDeriveFlag, "derive", false,

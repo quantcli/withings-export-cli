@@ -72,6 +72,7 @@ type measurementRow struct {
 var (
 	measurementsFormatFlag string
 	measurementsSinceFlag  string
+	measurementsUntilFlag  string
 	measurementsTypesFlag  string
 )
 
@@ -83,12 +84,16 @@ var measurementsCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		until, err := untilOrNow(measurementsUntilFlag)
+		if err != nil {
+			return err
+		}
 
 		params := url.Values{}
 		params.Set("action", "getmeas")
 		params.Set("category", "1")
 		params.Set("startdate", strconv.FormatInt(since.Unix(), 10))
-		params.Set("enddate", strconv.FormatInt(time.Now().Unix(), 10))
+		params.Set("enddate", strconv.FormatInt(until.Unix(), 10))
 		if measurementsTypesFlag != "" {
 			params.Set("meastypes", measurementsTypesFlag)
 		}
@@ -210,7 +215,9 @@ func writeMeasurementsMarkdown(rows []measurementRow) error {
 
 func init() {
 	measurementsCmd.Flags().StringVar(&measurementsSinceFlag, "since", "",
-		"Filter on or after date (e.g. 2026-01-01, 30d, 4w, 6m, 1y; default 30d)")
+		"Filter on or after date (today, yesterday, YYYY-MM-DD, or Nd/Nw/Nm/Ny; default 30d)")
+	measurementsCmd.Flags().StringVar(&measurementsUntilFlag, "until", "",
+		"Filter through date, inclusive (today, yesterday, YYYY-MM-DD, or Nd/Nw/Nm/Ny; default now)")
 	measurementsCmd.Flags().StringVar(&measurementsFormatFlag, "format", "markdown",
 		"Output format: markdown (default, fitdown-style), json, or csv")
 	measurementsCmd.Flags().StringVar(&measurementsTypesFlag, "types", "",

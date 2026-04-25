@@ -54,6 +54,7 @@ type intradayResponse struct {
 var (
 	intradayFormatFlag string
 	intradaySinceFlag  string
+	intradayUntilFlag  string
 )
 
 var intradayCmd = &cobra.Command{
@@ -72,16 +73,20 @@ Default window is the last 24h — intraday is dense; wider ranges are slow.`,
 		if err != nil {
 			return err
 		}
+		until, err := untilOrNow(intradayUntilFlag)
+		if err != nil {
+			return err
+		}
 
 		dataFields := "steps,elevation,calories,distance,duration,heart_rate," +
 			"hrv_quality,rmssd,sdnn1,spo2_auto"
 
 		c := client.New()
 		var all []intradaySample
-		for chunkStart := since; chunkStart.Before(time.Now()); chunkStart = chunkStart.Add(intradayWindow) {
+		for chunkStart := since; chunkStart.Before(until); chunkStart = chunkStart.Add(intradayWindow) {
 			chunkEnd := chunkStart.Add(intradayWindow)
-			if chunkEnd.After(time.Now()) {
-				chunkEnd = time.Now()
+			if chunkEnd.After(until) {
+				chunkEnd = until
 			}
 
 			params := url.Values{}
@@ -214,7 +219,9 @@ func writeIntradayMarkdown(samples []intradaySample) error {
 
 func init() {
 	intradayCmd.Flags().StringVar(&intradaySinceFlag, "since", "",
-		"Filter on or after date (e.g. 2026-04-15, 1d, 4w, 6m; default 1d)")
+		"Filter on or after date (today, yesterday, YYYY-MM-DD, or Nd/Nw/Nm/Ny; default 1d)")
+	intradayCmd.Flags().StringVar(&intradayUntilFlag, "until", "",
+		"Filter through date, inclusive (today, yesterday, YYYY-MM-DD, or Nd/Nw/Nm/Ny; default now)")
 	intradayCmd.Flags().StringVar(&intradayFormatFlag, "format", "markdown",
 		"Output format: markdown (default, fitdown-style), json, or csv")
 }
