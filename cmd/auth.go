@@ -14,6 +14,7 @@ import (
 var authCmd = &cobra.Command{
 	Use:          "auth",
 	Short:        "Authentication commands",
+	Args:         cobra.NoArgs,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SetOut(cmd.ErrOrStderr())
