@@ -78,19 +78,6 @@ var logoutCmd = &cobra.Command{
 	},
 }
 
-var refreshCmd = &cobra.Command{
-	Use:   "refresh",
-	Short: "Force a token refresh and report status",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		token, err := auth.GetToken()
-		if err != nil {
-			return err
-		}
-		fmt.Printf("Token valid: %s...\n", token[:min(20, len(token))])
-		return nil
-	},
-}
-
 var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Print one-line auth readiness state and exit 0 if usable",
@@ -98,8 +85,8 @@ var statusCmd = &cobra.Command{
 if a saved token is present and not yet expired, 1 otherwise.
 
 This is a local check — no network call and no refresh is attempted, even
-when the saved token is expired. Use 'auth refresh' (or any export
-subcommand) to actually refresh.
+when the saved token is expired. Any export subcommand will refresh
+automatically when needed.
 
 Per the quantcli shared contract:
 https://github.com/quantcli/common/blob/main/CONTRACT.md#5-auth`,
@@ -110,7 +97,7 @@ https://github.com/quantcli/common/blob/main/CONTRACT.md#5-auth`,
 		}
 		exp := store.ExpiresAt.Local().Format(time.RFC3339)
 		if time.Now().After(store.ExpiresAt) {
-			return fmt.Errorf("token expired %s — run: withings-export auth refresh", exp)
+			return fmt.Errorf("token expired %s — run: withings-export auth login", exp)
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "logged in as user %s (token expires %s)\n", store.UserID, exp)
 		return nil
@@ -120,6 +107,5 @@ https://github.com/quantcli/common/blob/main/CONTRACT.md#5-auth`,
 func init() {
 	authCmd.AddCommand(loginCmd)
 	authCmd.AddCommand(logoutCmd)
-	authCmd.AddCommand(refreshCmd)
 	authCmd.AddCommand(statusCmd)
 }
