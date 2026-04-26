@@ -12,8 +12,14 @@ import (
 )
 
 var authCmd = &cobra.Command{
-	Use:   "auth",
-	Short: "Authentication commands",
+	Use:          "auth",
+	Short:        "Authentication commands",
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cmd.SetOut(cmd.ErrOrStderr())
+		_ = cmd.Help()
+		return fmt.Errorf("subcommand required")
+	},
 }
 
 var loginCmd = &cobra.Command{
