@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 
 	"github.com/quantcli/withings-export-cli/internal/auth"
@@ -18,8 +19,16 @@ type Client struct {
 	baseURL string
 }
 
+// New returns a client pointed at Withings' production API. Setting
+// WITHINGS_API_BASE redirects requests to that origin instead — used by
+// the compat-test fixture to point the binary at a stub server so the
+// §4 data-path subtests can run without live OAuth.
 func New() *Client {
-	return &Client{http: &http.Client{}, baseURL: BaseURL}
+	base := BaseURL
+	if v := strings.TrimSpace(os.Getenv("WITHINGS_API_BASE")); v != "" {
+		base = strings.TrimRight(v, "/")
+	}
+	return &Client{http: &http.Client{}, baseURL: base}
 }
 
 // Call posts form-encoded params to a Withings API path and decodes the `body` field
