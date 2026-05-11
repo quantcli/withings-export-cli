@@ -2,7 +2,10 @@ module github.com/quantcli/withings-export-cli
 
 go 1.25.5
 
-require github.com/spf13/cobra v1.10.2
+require (
+	github.com/quantcli/common/compat v0.0.0-20260511001927-62c4c6634ff5
+	github.com/spf13/cobra v1.10.2
+)
 
 require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
