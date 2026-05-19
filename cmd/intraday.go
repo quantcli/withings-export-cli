@@ -69,6 +69,12 @@ spo2_auto, steps and distance; native Withings trackers report steps and HR.
 
 Default window is the last 24h — intraday is dense; wider ranges are slow.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Parse-level flag validation runs before any network call so an
+		// invalid --format exits non-zero hermetically (CONTRACT §4).
+		format, err := validateFormat(intradayFormatFlag)
+		if err != nil {
+			return err
+		}
 		since, err := sinceOrDefault(intradaySinceFlag, 1)
 		if err != nil {
 			return err
@@ -124,10 +130,6 @@ Default window is the last 24h — intraday is dense; wider ranges are slow.`,
 
 		sort.Slice(all, func(i, j int) bool { return all[i].Timestamp < all[j].Timestamp })
 
-		format, err := validateFormat(intradayFormatFlag)
-		if err != nil {
-			return err
-		}
 		switch format {
 		case "json":
 			return printJSON(all)
