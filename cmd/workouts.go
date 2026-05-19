@@ -95,6 +95,12 @@ var workoutsCmd = &cobra.Command{
 	Use:   "workouts",
 	Short: "Export workouts (runs, walks, bikes, etc.)",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Parse-level flag validation runs before any network call so an
+		// invalid --format exits non-zero hermetically (CONTRACT §4).
+		format, err := validateFormat(workoutsFormatFlag)
+		if err != nil {
+			return err
+		}
 		since, err := sinceOrDefault(workoutsSinceFlag, 90)
 		if err != nil {
 			return err
@@ -131,10 +137,6 @@ var workoutsCmd = &cobra.Command{
 
 		sort.Slice(all, func(i, j int) bool { return all[i].StartDate < all[j].StartDate })
 
-		format, err := validateFormat(workoutsFormatFlag)
-		if err != nil {
-			return err
-		}
 		switch format {
 		case "json":
 			return printJSON(all)

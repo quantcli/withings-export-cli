@@ -44,6 +44,12 @@ var sleepCmd = &cobra.Command{
 	Use:   "sleep",
 	Short: "Export nightly sleep summaries",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Parse-level flag validation runs before any network call so an
+		// invalid --format exits non-zero hermetically (CONTRACT §4).
+		format, err := validateFormat(sleepFormatFlag)
+		if err != nil {
+			return err
+		}
 		since, err := sinceOrDefault(sleepSinceFlag, 30)
 		if err != nil {
 			return err
@@ -110,10 +116,6 @@ var sleepCmd = &cobra.Command{
 
 		sort.Slice(all, func(i, j int) bool { return all[i].StartDate < all[j].StartDate })
 
-		format, err := validateFormat(sleepFormatFlag)
-		if err != nil {
-			return err
-		}
 		switch format {
 		case "json":
 			return printJSON(all)
