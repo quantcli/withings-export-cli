@@ -1,3 +1,8 @@
+# security.yml v1 — source of truth: quantcli/common; sync changes to every *-export-cli.
+# Bump the version when this workflow changes materially; a future drift-check job will key off it.
+# See quantcli/common CONTRIBUTING.md "Supply-chain and security" for the propagation policy and
+# the >5-repos switchover trigger to a reusable workflow_call.
+
 name: security
 
 # Supply-chain and license-policy gate for quantcli repos.
