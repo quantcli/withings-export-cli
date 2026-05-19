@@ -99,8 +99,9 @@ jobs:
       contents: read
     env:
       # Policy: every direct + transitive Go dep must resolve to one of these SPDX ids.
+      # Keep this list sorted by SPDX id; SECURITY.md "License allowlist" must match exactly.
       # See SECURITY.md "Supply-chain policy" for the rationale.
-      ALLOWED_LICENSES: "Apache-2.0,MIT,BSD-2-Clause,BSD-3-Clause,MPL-2.0,ISC,Unlicense"
+      ALLOWED_LICENSES: "0BSD,Apache-2.0,BSD-2-Clause,BSD-3-Clause,BSL-1.0,CC0-1.0,ISC,MIT,MPL-2.0,Unlicense"
     steps:
       - name: Checkout
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
