@@ -1,6 +1,6 @@
 module github.com/quantcli/withings-export-cli
 
-go 1.25.5
+go 1.25.10
 
 require (
 	github.com/quantcli/common/compat v0.0.0-20260511001927-62c4c6634ff5
