@@ -20,10 +20,12 @@ I/O
 AUTH
   withings-export auth login          OAuth2 in browser; tokens stored locally.
   withings-export auth status         Exit 0 if usable, 1 with reason. No network call.
-  withings-export auth refresh|logout
+  withings-export auth logout         Remove stored tokens.
 
   Optional env: WITHINGS_CLIENT_ID, WITHINGS_CLIENT_SECRET, WITHINGS_CALLBACK_URL.
-  Headless (CI): set WITHINGS_REFRESH_TOKEN (+ WITHINGS_CLIENT_ID/SECRET) to skip auth login.
+  Headless (CI): set WITHINGS_REFRESH_TOKEN (+ WITHINGS_CLIENT_ID/SECRET) to skip auth
+  login. It wins over any saved token. Withings rotates it on each use — the rotated
+  value lands in ~/.config/withings-export/auth.json; re-inject it on the next run.
   HTTPS-callback workaround: register https://redirectmeto.com/http://localhost:8128/oauth/authorize
   (verbatim) and set WITHINGS_CALLBACK_URL to the same string.
 

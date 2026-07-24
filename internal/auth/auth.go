@@ -18,9 +18,13 @@ import (
 	"time"
 )
 
+// tokenURL is a var, not a const, so tests can point the token exchange at an
+// httptest server. Refreshing against live Withings rotates the caller's real
+// refresh token, so the refresh path is untestable without this seam.
+var tokenURL = "https://wbsapi.withings.net/v2/oauth2"
+
 const (
-	authURL  = "https://account.withings.com/oauth2_user/authorize2"
-	tokenURL = "https://wbsapi.withings.net/v2/oauth2"
+	authURL = "https://account.withings.com/oauth2_user/authorize2"
 	// user.activity covers activity, intraday, workouts, and sleep endpoints.
 	// user.metrics covers measurements and heart-rate endpoints.
 	// user.info covers device listing. user.sleepevents is webhook-only and unused here.
@@ -42,17 +46,35 @@ func configPath() string {
 	return filepath.Join(home, ".config", "withings-export", "auth.json")
 }
 
+// refreshTokenEnvVar is the headless auth path required by CONTRACT.md §5: a
+// fresh container exports without an interactive login. When set it takes
+// precedence over the saved token file — a container with a stale mounted
+// config and a freshly injected secret must use the secret.
+const refreshTokenEnvVar = "WITHINGS_REFRESH_TOKEN"
+
 // GetToken returns a valid access token, refreshing if needed. Auth resolves
-// in order: the saved token file, then the WITHINGS_REFRESH_TOKEN env var (the
-// headless path required by quantcli CONTRACT.md §5, for CI and containers with
-// no interactive `auth login`).
+// in order: the WITHINGS_REFRESH_TOKEN env var, then the saved token file
+// (CONTRACT.md §5 precedence).
 func GetToken() (string, error) {
-	store, err := load()
-	if err != nil {
-		store, err = envStore()
+	if EnvRefreshToken() != "" {
+		store, err := envStore()
 		if err != nil {
 			return "", err
 		}
+		// Unlike liftoff-export, the headless path here persists: Withings
+		// rotates the refresh token on every use, so the rotated value must
+		// reach disk or the injected secret is unrecoverable after one run.
+		// Trade-off: on a shared machine this overwrites the interactive
+		// user's saved token. The write is best-effort (see refresh).
+		if err := refresh(store); err != nil {
+			return "", fmt.Errorf("%s refresh failed: %w", refreshTokenEnvVar, err)
+		}
+		return store.AccessToken, nil
+	}
+
+	store, err := load()
+	if err != nil {
+		return "", fmt.Errorf("not logged in — run: withings-export auth login (or set %s)", refreshTokenEnvVar)
 	}
 	if time.Now().After(store.ExpiresAt) {
 		if err := refresh(store); err != nil {
@@ -65,7 +87,7 @@ func GetToken() (string, error) {
 // EnvRefreshToken returns the refresh token supplied via WITHINGS_REFRESH_TOKEN,
 // or "" if unset. This is the headless auth path from CONTRACT.md §5.
 func EnvRefreshToken() string {
-	return strings.TrimSpace(os.Getenv("WITHINGS_REFRESH_TOKEN"))
+	return strings.TrimSpace(os.Getenv(refreshTokenEnvVar))
 }
 
 // envStore builds a TokenStore from the headless env vars. The returned store
@@ -75,15 +97,15 @@ func EnvRefreshToken() string {
 //
 // Note: Withings rotates refresh tokens on each refresh, so a fresh token is
 // saved to ~/.config/withings-export/auth.json after minting. Long-running
-// headless callers must persist that rotated token back for the next run.
+// headless callers must read that rotated token back and re-inject it.
 func envStore() (*TokenStore, error) {
 	rt := EnvRefreshToken()
 	if rt == "" {
-		return nil, fmt.Errorf("not logged in — run: withings-export auth login (or set WITHINGS_REFRESH_TOKEN)")
+		return nil, fmt.Errorf("not logged in — run: withings-export auth login (or set %s)", refreshTokenEnvVar)
 	}
 	id, secret := CredentialsFromEnv()
 	if id == "" || secret == "" {
-		return nil, fmt.Errorf("WITHINGS_REFRESH_TOKEN is set but WITHINGS_CLIENT_ID / WITHINGS_CLIENT_SECRET are missing")
+		return nil, fmt.Errorf("%s is set but WITHINGS_CLIENT_ID / WITHINGS_CLIENT_SECRET are missing", refreshTokenEnvVar)
 	}
 	return &TokenStore{RefreshToken: rt, ClientID: id, ClientSecret: secret}, nil
 }
@@ -238,7 +260,14 @@ func refresh(store *TokenStore) error {
 	if resp.UserID.String() != "" {
 		store.UserID = resp.UserID.String()
 	}
-	return save(store)
+	// Best-effort persist, per CONTRACT.md §5: the access token just minted is
+	// usable whether or not the cache write lands, and a read-only rootfs (or a
+	// container with no HOME) is a normal shape for the headless path. A failed
+	// write is a stderr warning, not an error — §4 keeps stdout data-only.
+	if err := save(store); err != nil {
+		fmt.Fprintf(os.Stderr, "withings-export: could not persist rotated refresh token: %v\n", err)
+	}
+	return nil
 }
 
 type tokenResponse struct {
