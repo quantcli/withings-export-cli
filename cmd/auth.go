@@ -94,7 +94,15 @@ https://github.com/quantcli/common/blob/main/CONTRACT.md#5-auth`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		store, err := auth.Load()
 		if err != nil {
-			return fmt.Errorf("not logged in — run: withings-export auth login")
+			if auth.EnvRefreshToken() != "" {
+				id, secret := auth.CredentialsFromEnv()
+				if id == "" || secret == "" {
+					return fmt.Errorf("WITHINGS_REFRESH_TOKEN is set but WITHINGS_CLIENT_ID / WITHINGS_CLIENT_SECRET are missing")
+				}
+				fmt.Fprintln(cmd.OutOrStdout(), "using WITHINGS_REFRESH_TOKEN (env); access token minted on demand")
+				return nil
+			}
+			return fmt.Errorf("not logged in — run: withings-export auth login (or set WITHINGS_REFRESH_TOKEN)")
 		}
 		exp := store.ExpiresAt.Local().Format(time.RFC3339)
 		if time.Now().After(store.ExpiresAt) {

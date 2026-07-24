@@ -23,6 +23,7 @@ AUTH
   withings-export auth refresh|logout
 
   Optional env: WITHINGS_CLIENT_ID, WITHINGS_CLIENT_SECRET, WITHINGS_CALLBACK_URL.
+  Headless (CI): set WITHINGS_REFRESH_TOKEN (+ WITHINGS_CLIENT_ID/SECRET) to skip auth login.
   HTTPS-callback workaround: register https://redirectmeto.com/http://localhost:8128/oauth/authorize
   (verbatim) and set WITHINGS_CALLBACK_URL to the same string.
 

@@ -42,11 +42,17 @@ func configPath() string {
 	return filepath.Join(home, ".config", "withings-export", "auth.json")
 }
 
-// GetToken returns a valid access token, refreshing if needed.
+// GetToken returns a valid access token, refreshing if needed. Auth resolves
+// in order: the saved token file, then the WITHINGS_REFRESH_TOKEN env var (the
+// headless path required by quantcli CONTRACT.md §5, for CI and containers with
+// no interactive `auth login`).
 func GetToken() (string, error) {
 	store, err := load()
 	if err != nil {
-		return "", fmt.Errorf("not logged in — run: withings-export auth login")
+		store, err = envStore()
+		if err != nil {
+			return "", err
+		}
 	}
 	if time.Now().After(store.ExpiresAt) {
 		if err := refresh(store); err != nil {
@@ -54,6 +60,32 @@ func GetToken() (string, error) {
 		}
 	}
 	return store.AccessToken, nil
+}
+
+// EnvRefreshToken returns the refresh token supplied via WITHINGS_REFRESH_TOKEN,
+// or "" if unset. This is the headless auth path from CONTRACT.md §5.
+func EnvRefreshToken() string {
+	return strings.TrimSpace(os.Getenv("WITHINGS_REFRESH_TOKEN"))
+}
+
+// envStore builds a TokenStore from the headless env vars. The returned store
+// has a zero (already-elapsed) ExpiresAt, so GetToken mints an access token from
+// the refresh token before first use. Requires WITHINGS_REFRESH_TOKEN plus the
+// client credentials (WITHINGS_CLIENT_ID / WITHINGS_CLIENT_SECRET).
+//
+// Note: Withings rotates refresh tokens on each refresh, so a fresh token is
+// saved to ~/.config/withings-export/auth.json after minting. Long-running
+// headless callers must persist that rotated token back for the next run.
+func envStore() (*TokenStore, error) {
+	rt := EnvRefreshToken()
+	if rt == "" {
+		return nil, fmt.Errorf("not logged in — run: withings-export auth login (or set WITHINGS_REFRESH_TOKEN)")
+	}
+	id, secret := CredentialsFromEnv()
+	if id == "" || secret == "" {
+		return nil, fmt.Errorf("WITHINGS_REFRESH_TOKEN is set but WITHINGS_CLIENT_ID / WITHINGS_CLIENT_SECRET are missing")
+	}
+	return &TokenStore{RefreshToken: rt, ClientID: id, ClientSecret: secret}, nil
 }
 
 // Login runs the OAuth2 authorization-code flow against a local callback server.

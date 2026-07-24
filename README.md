@@ -102,6 +102,23 @@ withings-export auth logout     # Remove stored tokens
 withings-export auth refresh    # Force refresh and print status
 ```
 
+### Headless / CI
+
+Where there's no browser to run `auth login`, supply the refresh token via the
+environment instead of the token file (quantcli [contract](https://github.com/quantcli/common/blob/main/CONTRACT.md#5-auth) §5):
+
+```sh
+export WITHINGS_CLIENT_ID=...
+export WITHINGS_CLIENT_SECRET=...
+export WITHINGS_REFRESH_TOKEN=...   # from a prior local `auth login` (see auth.json)
+withings-export measurements --since 30d
+```
+
+The CLI mints an access token from the refresh token on demand. **Withings
+rotates refresh tokens on each refresh**, so a static `WITHINGS_REFRESH_TOKEN`
+is single-use — a long-running job must capture the rotated token (written to
+`~/.config/withings-export/auth.json`) and feed it back for the next run.
+
 ## Usage
 
 ### Measurements (scales, BP monitors, ECG)
