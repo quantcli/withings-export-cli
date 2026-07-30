@@ -7,9 +7,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// version is overwritten at release time via
+// -ldflags "-X github.com/quantcli/withings-export-cli/cmd.version=v1.2.0".
+// Setting rootCmd.Version below makes cobra register --version for free.
+var version = "dev"
+
 var rootCmd = &cobra.Command{
 	Use:          "withings-export",
 	Short:        "CLI to export health data from Withings",
+	Version:      version,
 	SilenceUsage: true,
 	Long: `withings-export reads your personal Withings health data — activity,
 sleep, workouts, body measurements, intraday samples — and prints it on
