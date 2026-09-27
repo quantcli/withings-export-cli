@@ -37,8 +37,6 @@ homebrew_casks:
     homepage: https://github.com/quantcli/withings-export-cli
     description: CLI to export health data from Withings (scales, watches, activity, sleep)
     license: MIT
-    url:
-      verified: github.com/quantcli/withings-export-cli
     hooks:
       post:
         install: |
