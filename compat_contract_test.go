@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/quantcli/common/compat"
+	"github.com/quantcli/common/compat/dates"
 	"github.com/quantcli/common/compat/formats"
 )
 
@@ -111,4 +112,13 @@ func writeFakeAuthToken(t *testing.T) string {
 		t.Fatalf("write auth.json: %v", err)
 	}
 	return home
+}
+
+// TestResolvedWindow verifies local dates independently of upstream credentials.
+func TestResolvedWindow(t *testing.T) {
+	bin := os.Getenv("WITHINGS_EXPORT_BIN")
+	if bin == "" {
+		t.Skip("WITHINGS_EXPORT_BIN not set")
+	}
+	dates.RunResolvedWindow(t, compat.Runner{Binary: bin, Subcommands: []string{"activity", "intraday", "measurements", "sleep", "workouts"}})
 }
