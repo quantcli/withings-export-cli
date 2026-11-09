@@ -54,10 +54,10 @@ type measure struct {
 }
 
 type getmeasResponse struct {
-	Timezone     string         `json:"timezone"`
-	Measuregrps  []measureGroup `json:"measuregrps"`
-	More         int            `json:"more"`
-	Offset       int            `json:"offset"`
+	Timezone    string         `json:"timezone"`
+	Measuregrps []measureGroup `json:"measuregrps"`
+	More        int            `json:"more"`
+	Offset      int            `json:"offset"`
 }
 
 type measurementRow struct {
@@ -92,6 +92,9 @@ var measurementsCmd = &cobra.Command{
 		}
 		until, err := untilOrNow(measurementsUntilFlag)
 		if err != nil {
+			return err
+		}
+		if printed, err := printResolvedWindow(cmd, since, until); printed || err != nil {
 			return err
 		}
 

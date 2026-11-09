@@ -63,6 +63,9 @@ var activityCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		if printed, err := printResolvedWindow(cmd, since, until.AddDate(0, 0, 1)); printed || err != nil {
+			return err
+		}
 
 		dataFields := "steps,distance,elevation,soft,moderate,intense,active," +
 			"calories,totalcalories,hr_average,hr_min,hr_max,hr_zone_0,hr_zone_1,hr_zone_2,hr_zone_3"
