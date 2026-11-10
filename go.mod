@@ -3,7 +3,7 @@ module github.com/quantcli/withings-export-cli
 go 1.26.10
 
 require (
-	github.com/quantcli/common/compat v0.0.0-20260511001927-62c4c6634ff5
+	github.com/quantcli/common/compat v0.0.0-20261110001356-0b66a42dfa85
 	github.com/spf13/cobra v1.10.2
 )
 

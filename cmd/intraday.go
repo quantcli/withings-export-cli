@@ -83,6 +83,9 @@ Default window is the last 24h — intraday is dense; wider ranges are slow.`,
 		if err != nil {
 			return err
 		}
+		if printed, err := printResolvedWindow(cmd, since, until); printed || err != nil {
+			return err
+		}
 
 		dataFields := "steps,elevation,calories,distance,duration,heart_rate," +
 			"hrv_quality,rmssd,sdnn1,spo2_auto"

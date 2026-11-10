@@ -58,6 +58,9 @@ var sleepCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		if printed, err := printResolvedWindow(cmd, since, until.AddDate(0, 0, 1)); printed || err != nil {
+			return err
+		}
 
 		// All sleep summary data fields we care about. Must be explicitly requested.
 		dataFields := "wakeupduration,lightsleepduration,deepsleepduration,remsleepduration," +
@@ -244,7 +247,7 @@ func deriveSleep(c *client.Client, date time.Time) (*sleepSeries, error) {
 	// heart rate, or a meaningful burst of steps. Small step samples (bathroom
 	// trips, rolling over) do not break the run — they're just HealthKit's way
 	// of reporting brief motion without an accompanying HR reading.
-	const hrBreak = 90  // bpm above this = awake/active
+	const hrBreak = 90 // bpm above this = awake/active
 	const stepsBreak = 30
 
 	const maxGap int64 = 90 * 60  // 90 min — tolerate watch-off-for-charging
