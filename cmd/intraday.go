@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/csv"
 	"fmt"
 	"net/url"
 	"os"
@@ -16,20 +15,30 @@ import (
 // Withings /v2/measure action=getintradayactivity returns at most 24h per call.
 const intradayWindow = 24 * time.Hour
 
-type intradaySample struct {
-	Timestamp  int64   `json:"timestamp"`
-	Duration   int     `json:"duration"`
-	Steps      int     `json:"steps"`
-	Distance   float64 `json:"distance"`
-	Elevation  float64 `json:"elevation"`
-	Calories   float64 `json:"calories"`
-	HeartRate  int     `json:"heart_rate"`
-	HRVQuality int     `json:"hrv_quality"`
-	RMSSD      float64 `json:"rmssd"`
-	SDNN1      float64 `json:"sdnn1"`
-	SpO2       float64 `json:"spo2_auto"`
-	Model      string  `json:"model"`
-	ModelID    int     `json:"model_id"`
+// intradayRow is the canonical §4 row for `intraday`, shared by all
+// three codecs — see cmd/rowcodec.go.
+//
+// `hrv_rmssd` / `hrv_sdnn1` are the CSV spellings; the JSON codec used
+// to emit the bare upstream `rmssd` / `sdnn1` (#20). `date` is the
+// sample instant in RFC3339-with-offset, which the CSV codec used to
+// call `datetime` and the JSON codec did not emit at all. The epoch
+// `timestamp` is kept alongside it: it is zone-agnostic, which is
+// genuinely useful for bucketing, and `prime` already advertised it.
+type intradayRow struct {
+	Date        string  `json:"date"`
+	Timestamp   int64   `json:"timestamp"`
+	DurationSec int     `json:"duration_sec"`
+	Steps       int     `json:"steps"`
+	DistanceM   float64 `json:"distance_m"`
+	ElevationM  float64 `json:"elevation_m"`
+	Calories    float64 `json:"calories"`
+	HeartRate   int     `json:"heart_rate"`
+	HRVRMSSD    float64 `json:"hrv_rmssd"`
+	HRVSDNN1    float64 `json:"hrv_sdnn1"`
+	HRVQuality  int     `json:"hrv_quality"`
+	SpO2Auto    float64 `json:"spo2_auto"`
+	Model       string  `json:"model"`
+	ModelID     int     `json:"model_id"`
 }
 
 type intradayPayload struct {
@@ -49,6 +58,27 @@ type intradayPayload struct {
 
 type intradayResponse struct {
 	Series map[string]intradayPayload `json:"series"`
+}
+
+// row converts one upstream sample into the canonical §4 row, applying
+// the decimal budgets from #26.
+func (p intradayPayload) row(ts int64) intradayRow {
+	return intradayRow{
+		Date:        time.Unix(ts, 0).Local().Format(time.RFC3339),
+		Timestamp:   ts,
+		DurationSec: p.Duration,
+		Steps:       p.Steps,
+		DistanceM:   round(p.Distance, 2),
+		ElevationM:  round(p.Elevation, 2),
+		Calories:    round(p.Calories, 1),
+		HeartRate:   p.HeartRate,
+		HRVRMSSD:    round(p.RMSSD, 2),
+		HRVSDNN1:    round(p.SDNN1, 2),
+		HRVQuality:  p.HRVQuality,
+		SpO2Auto:    round(p.SpO2, 1),
+		Model:       p.Model,
+		ModelID:     p.ModelID,
+	}
 }
 
 var (
@@ -91,7 +121,7 @@ Default window is the last 24h — intraday is dense; wider ranges are slow.`,
 			"hrv_quality,rmssd,sdnn1,spo2_auto"
 
 		c := client.New()
-		var all []intradaySample
+		var all []intradayRow
 		for chunkStart := since; chunkStart.Before(until); chunkStart = chunkStart.Add(intradayWindow) {
 			chunkEnd := chunkStart.Add(intradayWindow)
 			if chunkEnd.After(until) {
@@ -113,21 +143,7 @@ Default window is the last 24h — intraday is dense; wider ranges are slow.`,
 				if err != nil {
 					continue
 				}
-				all = append(all, intradaySample{
-					Timestamp:  ts,
-					Duration:   p.Duration,
-					Steps:      p.Steps,
-					Distance:   p.Distance,
-					Elevation:  p.Elevation,
-					Calories:   p.Calories,
-					HeartRate:  p.HeartRate,
-					HRVQuality: p.HRVQuality,
-					RMSSD:      p.RMSSD,
-					SDNN1:      p.SDNN1,
-					SpO2:       p.SpO2,
-					Model:      p.Model,
-					ModelID:    p.ModelID,
-				})
+				all = append(all, p.row(ts))
 			}
 		}
 
@@ -137,53 +153,17 @@ Default window is the last 24h — intraday is dense; wider ranges are slow.`,
 		case "json":
 			return printJSON(all)
 		case "csv":
-			return writeIntradayCSV(all)
+			return writeCSV(all)
 		default:
 			return writeIntradayMarkdown(all)
 		}
 	},
 }
 
-func writeIntradayCSV(samples []intradaySample) error {
-	w := csv.NewWriter(os.Stdout)
-	defer w.Flush()
-	header := []string{
-		"timestamp", "datetime", "duration_sec",
-		"steps", "distance_m", "elevation_m", "calories",
-		"heart_rate", "hrv_rmssd", "hrv_sdnn1", "hrv_quality", "spo2_auto",
-		"model", "model_id",
-	}
-	if err := w.Write(header); err != nil {
-		return err
-	}
-	for _, s := range samples {
-		row := []string{
-			strconv.FormatInt(s.Timestamp, 10),
-			time.Unix(s.Timestamp, 0).Local().Format(time.RFC3339),
-			strconv.Itoa(s.Duration),
-			strconv.Itoa(s.Steps),
-			strconv.FormatFloat(s.Distance, 'f', -1, 64),
-			strconv.FormatFloat(s.Elevation, 'f', -1, 64),
-			strconv.FormatFloat(s.Calories, 'f', -1, 64),
-			strconv.Itoa(s.HeartRate),
-			strconv.FormatFloat(s.RMSSD, 'f', -1, 64),
-			strconv.FormatFloat(s.SDNN1, 'f', -1, 64),
-			strconv.Itoa(s.HRVQuality),
-			strconv.FormatFloat(s.SpO2, 'f', -1, 64),
-			s.Model,
-			strconv.Itoa(s.ModelID),
-		}
-		if err := w.Write(row); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // writeIntradayMarkdown emits one fitdown-style "Intraday DATE" block per
 // local day, with one line per sample carrying only the fields that have
 // values. Suppressing zero fields keeps the firehose readable.
-func writeIntradayMarkdown(samples []intradaySample) error {
+func writeIntradayMarkdown(samples []intradayRow) error {
 	var lastDate string
 	for _, s := range samples {
 		ts := time.Unix(s.Timestamp, 0).Local()
@@ -199,20 +179,20 @@ func writeIntradayMarkdown(samples []intradaySample) error {
 		if s.HeartRate > 0 {
 			fmt.Fprintf(os.Stdout, " HR %d", s.HeartRate)
 		}
-		if s.RMSSD > 0 {
-			fmt.Fprintf(os.Stdout, " rmssd %s", fmtNum(s.RMSSD))
+		if s.HRVRMSSD > 0 {
+			fmt.Fprintf(os.Stdout, " rmssd %s", fmtNum(s.HRVRMSSD))
 		}
-		if s.SDNN1 > 0 {
-			fmt.Fprintf(os.Stdout, " sdnn1 %s", fmtNum(s.SDNN1))
+		if s.HRVSDNN1 > 0 {
+			fmt.Fprintf(os.Stdout, " sdnn1 %s", fmtNum(s.HRVSDNN1))
 		}
-		if s.SpO2 > 0 {
-			fmt.Fprintf(os.Stdout, " spo2 %s", fmtNum(s.SpO2))
+		if s.SpO2Auto > 0 {
+			fmt.Fprintf(os.Stdout, " spo2 %s", fmtNum(s.SpO2Auto))
 		}
 		if s.Steps > 0 {
 			fmt.Fprintf(os.Stdout, " %d steps", s.Steps)
 		}
-		if s.Distance > 0 {
-			fmt.Fprintf(os.Stdout, " %sm", fmtNum(s.Distance))
+		if s.DistanceM > 0 {
+			fmt.Fprintf(os.Stdout, " %sm", fmtNum(s.DistanceM))
 		}
 		if s.Calories > 0 {
 			fmt.Fprintf(os.Stdout, " %s cal", fmtNum(s.Calories))

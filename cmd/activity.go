@@ -1,12 +1,12 @@
 package cmd
 
 import (
-	"encoding/csv"
 	"fmt"
 	"net/url"
 	"os"
 	"sort"
 	"strconv"
+	"time"
 
 	"github.com/quantcli/withings-export-cli/internal/client"
 	"github.com/spf13/cobra"
@@ -25,6 +25,36 @@ type activityDay struct {
 	Calories      float64 `json:"calories"`
 	TotalCalories float64 `json:"totalcalories"`
 	HRAvg         float64 `json:"hr_average"`
+	HRMin         float64 `json:"hr_min"`
+	HRMax         float64 `json:"hr_max"`
+	HRZone0       int     `json:"hr_zone_0"`
+	HRZone1       int     `json:"hr_zone_1"`
+	HRZone2       int     `json:"hr_zone_2"`
+	HRZone3       int     `json:"hr_zone_3"`
+}
+
+// activityRow is the canonical §4 row for `activity`, shared by all
+// three codecs. Names carry their unit (`distance_m`, `soft_sec`) and
+// match the CSV header exactly — see cmd/rowcodec.go.
+//
+// `date` is the row's instant in RFC3339-with-offset, which for a
+// day-keyed row is local midnight; `calendar_date` is the day label
+// itself. Splitting them is what lets `date` mean one thing across all
+// five subcommands (§2, §4) without losing the plain day string.
+type activityRow struct {
+	Date          string  `json:"date"`
+	CalendarDate  string  `json:"calendar_date"`
+	Timezone      string  `json:"timezone"`
+	Steps         int     `json:"steps"`
+	DistanceM     float64 `json:"distance_m"`
+	ElevationM    float64 `json:"elevation_m"`
+	SoftSec       int     `json:"soft_sec"`
+	ModerateSec   int     `json:"moderate_sec"`
+	IntenseSec    int     `json:"intense_sec"`
+	ActiveSec     int     `json:"active_sec"`
+	Calories      float64 `json:"calories"`
+	TotalCalories float64 `json:"total_calories"`
+	HRAvg         float64 `json:"hr_avg"`
 	HRMin         float64 `json:"hr_min"`
 	HRMax         float64 `json:"hr_max"`
 	HRZone0       int     `json:"hr_zone_0"`
@@ -92,65 +122,56 @@ var activityCmd = &cobra.Command{
 
 		sort.Slice(all, func(i, j int) bool { return all[i].Date < all[j].Date })
 
+		rows := make([]activityRow, 0, len(all))
+		for _, d := range all {
+			rows = append(rows, d.row())
+		}
+
 		switch format {
 		case "json":
-			return printJSON(all)
+			return printJSON(rows)
 		case "csv":
-			return writeActivityCSV(all)
+			return writeCSV(rows)
 		default:
-			return writeActivityMarkdown(all)
+			return writeActivityMarkdown(rows)
 		}
 	},
 }
 
-func writeActivityCSV(days []activityDay) error {
-	w := csv.NewWriter(os.Stdout)
-	defer w.Flush()
-	header := []string{
-		"date", "timezone", "steps", "distance_m", "elevation_m",
-		"soft_sec", "moderate_sec", "intense_sec", "active_sec",
-		"calories", "total_calories",
-		"hr_avg", "hr_min", "hr_max",
-		"hr_zone_0", "hr_zone_1", "hr_zone_2", "hr_zone_3",
+// row converts one upstream activity day into the canonical §4 row,
+// applying the decimal budgets from #26. The rounding lives here rather
+// than in either serializer so JSON and CSV cannot disagree about it.
+func (d activityDay) row() activityRow {
+	return activityRow{
+		Date:          localMidnightRFC3339(d.Date),
+		CalendarDate:  d.Date,
+		Timezone:      d.Timezone,
+		Steps:         d.Steps,
+		DistanceM:     round(d.Distance, 2),
+		ElevationM:    round(d.Elevation, 2),
+		SoftSec:       d.Soft,
+		ModerateSec:   d.Moderate,
+		IntenseSec:    d.Intense,
+		ActiveSec:     d.Active,
+		Calories:      round(d.Calories, 1),
+		TotalCalories: round(d.TotalCalories, 1),
+		HRAvg:         round(d.HRAvg, 1),
+		HRMin:         round(d.HRMin, 0),
+		HRMax:         round(d.HRMax, 0),
+		HRZone0:       d.HRZone0,
+		HRZone1:       d.HRZone1,
+		HRZone2:       d.HRZone2,
+		HRZone3:       d.HRZone3,
 	}
-	if err := w.Write(header); err != nil {
-		return err
-	}
-	for _, d := range days {
-		row := []string{
-			d.Date,
-			d.Timezone,
-			strconv.Itoa(d.Steps),
-			strconv.FormatFloat(d.Distance, 'f', -1, 64),
-			strconv.FormatFloat(d.Elevation, 'f', -1, 64),
-			strconv.Itoa(d.Soft),
-			strconv.Itoa(d.Moderate),
-			strconv.Itoa(d.Intense),
-			strconv.Itoa(d.Active),
-			strconv.FormatFloat(d.Calories, 'f', -1, 64),
-			strconv.FormatFloat(d.TotalCalories, 'f', -1, 64),
-			strconv.FormatFloat(d.HRAvg, 'f', -1, 64),
-			strconv.FormatFloat(d.HRMin, 'f', -1, 64),
-			strconv.FormatFloat(d.HRMax, 'f', -1, 64),
-			strconv.Itoa(d.HRZone0),
-			strconv.Itoa(d.HRZone1),
-			strconv.Itoa(d.HRZone2),
-			strconv.Itoa(d.HRZone3),
-		}
-		if err := w.Write(row); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // writeActivityMarkdown emits one fitdown-style block per day. Empty/zero
 // fields are dropped to keep output tight.
-func writeActivityMarkdown(days []activityDay) error {
+func writeActivityMarkdown(days []activityRow) error {
 	for _, d := range days {
-		fmt.Fprintf(os.Stdout, "Activity %s\n\n", d.Date)
-		if d.Steps > 0 || d.Distance > 0 {
-			fmt.Fprintf(os.Stdout, "%d steps, %.2f km\n", d.Steps, d.Distance/1000)
+		fmt.Fprintf(os.Stdout, "Activity %s\n\n", d.CalendarDate)
+		if d.Steps > 0 || d.DistanceM > 0 {
+			fmt.Fprintf(os.Stdout, "%d steps, %.2f km\n", d.Steps, d.DistanceM/1000)
 		}
 		if d.Calories > 0 || d.TotalCalories > 0 {
 			fmt.Fprintf(os.Stdout, "%s cal active, %s total\n", fmtRound(d.Calories), fmtRound(d.TotalCalories))
@@ -158,16 +179,28 @@ func writeActivityMarkdown(days []activityDay) error {
 		if d.HRAvg > 0 {
 			fmt.Fprintf(os.Stdout, "HR avg %s, %s-%s\n", fmtRound(d.HRAvg), fmtRound(d.HRMin), fmtRound(d.HRMax))
 		}
-		if d.Active > 0 {
+		if d.ActiveSec > 0 {
 			fmt.Fprintf(os.Stdout, "Active %s — %s soft, %s moderate, %s intense\n",
-				fmtDur(d.Active), fmtDur(d.Soft), fmtDur(d.Moderate), fmtDur(d.Intense))
+				fmtDur(d.ActiveSec), fmtDur(d.SoftSec), fmtDur(d.ModerateSec), fmtDur(d.IntenseSec))
 		}
-		if d.Elevation > 0 {
-			fmt.Fprintf(os.Stdout, "%s m elevation\n", fmtRound(d.Elevation))
+		if d.ElevationM > 0 {
+			fmt.Fprintf(os.Stdout, "%s m elevation\n", fmtRound(d.ElevationM))
 		}
 		fmt.Fprintln(os.Stdout)
 	}
 	return nil
+}
+
+// localMidnightRFC3339 renders a YYYY-MM-DD day label as local midnight
+// of that day in RFC3339 with offset. Returns the input unchanged if it
+// is not a parseable day, so a surprising upstream value is visible
+// rather than replaced by a wrong timestamp.
+func localMidnightRFC3339(day string) string {
+	t, err := time.ParseInLocation("2006-01-02", day, time.Local)
+	if err != nil {
+		return day
+	}
+	return t.Format(time.RFC3339)
 }
 
 func init() {

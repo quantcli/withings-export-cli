@@ -1,8 +1,6 @@
 package cmd
 
 import (
-	"encoding/csv"
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
@@ -15,16 +13,88 @@ import (
 )
 
 type sleepSeries struct {
-	ID        int64           `json:"id"`
-	Timezone  string          `json:"timezone"`
-	Model     int             `json:"model"`
-	StartDate int64           `json:"startdate"`
-	EndDate   int64           `json:"enddate"`
-	Date      string          `json:"date"`
-	Data      json.RawMessage `json:"data"`
-	// Source is synthetic (not from API): "summary" for getsummary rows,
-	// "derived" for rows polyfilled from intraday samples via --derive.
-	Source string `json:"source"`
+	ID        int64     `json:"id"`
+	Timezone  string    `json:"timezone"`
+	Model     int       `json:"model"`
+	StartDate int64     `json:"startdate"`
+	EndDate   int64     `json:"enddate"`
+	Date      string    `json:"date"`
+	Data      sleepData `json:"data"`
+}
+
+// sleepData is the upstream `data` sub-object.
+//
+// Every field is a pointer because Withings only sends the ones the
+// recording device supports — sleep score and the apnea index appear
+// only on some hardware. Decoding into value types made "my device does
+// not measure this" indistinguishable from "this was zero", which is
+// what CONTRACT §4 forbids: an absent value is `null`, never 0, "so a
+// missing measurement can't be read as a real one".
+type sleepData struct {
+	WakeupDuration        *int     `json:"wakeupduration"`
+	LightSleepDuration    *int     `json:"lightsleepduration"`
+	DeepSleepDuration     *int     `json:"deepsleepduration"`
+	REMSleepDuration      *int     `json:"remsleepduration"`
+	DurationToSleep       *int     `json:"durationtosleep"`
+	DurationToWakeup      *int     `json:"durationtowakeup"`
+	WakeupCount           *int     `json:"wakeupcount"`
+	SleepScore            *int     `json:"sleep_score"`
+	HRAvg                 *float64 `json:"hr_average"`
+	HRMin                 *float64 `json:"hr_min"`
+	HRMax                 *float64 `json:"hr_max"`
+	RRAvg                 *float64 `json:"rr_average"`
+	RRMin                 *float64 `json:"rr_min"`
+	RRMax                 *float64 `json:"rr_max"`
+	BreathingDisturbances *int     `json:"breathing_disturbances_intensity"`
+	Snoring               *int     `json:"snoring"`
+	SnoringEpisodeCount   *int     `json:"snoringepisodecount"`
+	ApneaHypopneaIndex    *float64 `json:"apnea_hypopnea_index"`
+}
+
+// sleepRow is the canonical §4 row for `sleep`, shared by all three
+// codecs — see cmd/rowcodec.go.
+//
+// Durations are seconds. Before this change `--format csv` emitted
+// `total_sleep_min` / `light_min` / `deep_min` / `rem_min` while
+// `--format json` passed the upstream blob through with the same
+// quantities nested and in seconds — issue #42, "not two encodings of
+// one dataset; two different datasets". Seconds win because they are
+// upstream's unit and `/60` is lossy; markdown still renders "8h04",
+// which is where human formatting belongs.
+//
+// Everything the `--derive` heuristic cannot measure is a pointer, so a
+// derived row reports `null` rather than claiming a measured zero
+// (#21). `source` distinguishes the two origins.
+type sleepRow struct {
+	Date                  string   `json:"date"`
+	CalendarDate          string   `json:"calendar_date"`
+	Start                 string   `json:"start"`
+	End                   string   `json:"end"`
+	StartEpoch            int64    `json:"start_epoch"`
+	EndEpoch              int64    `json:"end_epoch"`
+	ID                    *int64   `json:"id"`
+	Timezone              string   `json:"timezone"`
+	Model                 *int     `json:"model"`
+	TotalSleepSec         *int     `json:"total_sleep_sec"`
+	LightSec              *int     `json:"light_sec"`
+	DeepSec               *int     `json:"deep_sec"`
+	REMSec                *int     `json:"rem_sec"`
+	AwakeSec              *int     `json:"awake_sec"`
+	TimeToSleepSec        *int     `json:"time_to_sleep_sec"`
+	TimeToWakeupSec       *int     `json:"time_to_wakeup_sec"`
+	WakeupCount           *int     `json:"wakeup_count"`
+	SleepScore            *int     `json:"sleep_score"`
+	HRAvg                 *float64 `json:"hr_avg"`
+	HRMin                 *float64 `json:"hr_min"`
+	HRMax                 *float64 `json:"hr_max"`
+	RRAvg                 *float64 `json:"rr_avg"`
+	RRMin                 *float64 `json:"rr_min"`
+	RRMax                 *float64 `json:"rr_max"`
+	BreathingDisturbances *int     `json:"breathing_disturbances_intensity"`
+	SnoringSec            *int     `json:"snoring_sec"`
+	SnoreEpisodes         *int     `json:"snore_episodes"`
+	ApneaHypopneaIndex    *float64 `json:"apnea_hypopnea_index"`
+	Source                string   `json:"source"`
 }
 
 type sleepResponse struct {
@@ -75,23 +145,21 @@ var sleepCmd = &cobra.Command{
 		params.Set("data_fields", dataFields)
 
 		c := client.New()
-		var all []sleepSeries
+		var all []sleepRow
+		haveDate := make(map[string]bool)
 		for {
 			var resp sleepResponse
 			if err := c.Call("/v2/sleep", params, &resp); err != nil {
 				return err
 			}
-			all = append(all, resp.Series...)
+			for _, s := range resp.Series {
+				all = append(all, s.row())
+				haveDate[s.Date] = true
+			}
 			if !resp.More {
 				break
 			}
 			params.Set("offset", strconv.Itoa(resp.Offset))
-		}
-
-		haveDate := make(map[string]bool, len(all))
-		for i := range all {
-			all[i].Source = "summary"
-			haveDate[all[i].Date] = true
 		}
 
 		if sleepDeriveFlag {
@@ -117,86 +185,87 @@ var sleepCmd = &cobra.Command{
 			}
 		}
 
-		sort.Slice(all, func(i, j int) bool { return all[i].StartDate < all[j].StartDate })
+		sort.Slice(all, func(i, j int) bool { return all[i].StartEpoch < all[j].StartEpoch })
 
 		switch format {
 		case "json":
 			return printJSON(all)
 		case "csv":
-			return writeSleepCSV(all)
+			return writeCSV(all)
 		default:
 			return writeSleepMarkdown(all)
 		}
 	},
 }
 
-func writeSleepCSV(series []sleepSeries) error {
-	w := csv.NewWriter(os.Stdout)
-	defer w.Flush()
-	header := []string{
-		"date", "start", "end", "timezone",
-		"total_sleep_min", "light_min", "deep_min", "rem_min",
-		"time_to_sleep_sec", "time_to_wakeup_sec", "wakeup_count",
-		"sleep_score", "hr_avg", "hr_min", "hr_max",
-		"rr_avg", "rr_min", "rr_max", "snore_episodes", "apnea_hypopnea_index",
-		"source",
+// row converts one upstream sleep summary into the canonical §4 row.
+func (s sleepSeries) row() sleepRow {
+	d := s.Data
+	id := s.ID
+	model := s.Model
+	return sleepRow{
+		Date:                  localMidnightRFC3339(s.Date),
+		CalendarDate:          s.Date,
+		Start:                 time.Unix(s.StartDate, 0).Local().Format(time.RFC3339),
+		End:                   time.Unix(s.EndDate, 0).Local().Format(time.RFC3339),
+		StartEpoch:            s.StartDate,
+		EndEpoch:              s.EndDate,
+		ID:                    &id,
+		Timezone:              s.Timezone,
+		Model:                 &model,
+		TotalSleepSec:         totalSleepSec(d),
+		LightSec:              d.LightSleepDuration,
+		DeepSec:               d.DeepSleepDuration,
+		REMSec:                d.REMSleepDuration,
+		AwakeSec:              d.WakeupDuration,
+		TimeToSleepSec:        d.DurationToSleep,
+		TimeToWakeupSec:       d.DurationToWakeup,
+		WakeupCount:           d.WakeupCount,
+		SleepScore:            d.SleepScore,
+		HRAvg:                 roundPtr(d.HRAvg, 1),
+		HRMin:                 roundPtr(d.HRMin, 0),
+		HRMax:                 roundPtr(d.HRMax, 0),
+		RRAvg:                 roundPtr(d.RRAvg, 1),
+		RRMin:                 roundPtr(d.RRMin, 0),
+		RRMax:                 roundPtr(d.RRMax, 0),
+		BreathingDisturbances: d.BreathingDisturbances,
+		SnoringSec:            d.Snoring,
+		SnoreEpisodes:         d.SnoringEpisodeCount,
+		ApneaHypopneaIndex:    roundPtr(d.ApneaHypopneaIndex, 1),
+		Source:                "summary",
 	}
-	if err := w.Write(header); err != nil {
-		return err
-	}
-	for _, s := range series {
-		var d struct {
-			Wake          int     `json:"wakeupduration"`
-			Light         int     `json:"lightsleepduration"`
-			Deep          int     `json:"deepsleepduration"`
-			REM           int     `json:"remsleepduration"`
-			ToSleep       int     `json:"durationtosleep"`
-			ToWakeup      int     `json:"durationtowakeup"`
-			WakeupCount   int     `json:"wakeupcount"`
-			SleepScore    int     `json:"sleep_score"`
-			HRAvg         float64 `json:"hr_average"`
-			HRMin         float64 `json:"hr_min"`
-			HRMax         float64 `json:"hr_max"`
-			RRAvg         float64 `json:"rr_average"`
-			RRMin         float64 `json:"rr_min"`
-			RRMax         float64 `json:"rr_max"`
-			SnoreEpisodes int     `json:"snoringepisodecount"`
-			ApneaHypopnea float64 `json:"apnea_hypopnea_index"`
-		}
-		_ = json.Unmarshal(s.Data, &d)
+}
 
-		start := time.Unix(s.StartDate, 0).Local()
-		end := time.Unix(s.EndDate, 0).Local()
-		totalSleepMin := (d.Light + d.Deep + d.REM) / 60
-
-		row := []string{
-			s.Date,
-			start.Format(time.RFC3339),
-			end.Format(time.RFC3339),
-			s.Timezone,
-			strconv.Itoa(totalSleepMin),
-			strconv.Itoa(d.Light / 60),
-			strconv.Itoa(d.Deep / 60),
-			strconv.Itoa(d.REM / 60),
-			strconv.Itoa(d.ToSleep),
-			strconv.Itoa(d.ToWakeup),
-			strconv.Itoa(d.WakeupCount),
-			strconv.Itoa(d.SleepScore),
-			strconv.FormatFloat(d.HRAvg, 'f', -1, 64),
-			strconv.FormatFloat(d.HRMin, 'f', -1, 64),
-			strconv.FormatFloat(d.HRMax, 'f', -1, 64),
-			strconv.FormatFloat(d.RRAvg, 'f', -1, 64),
-			strconv.FormatFloat(d.RRMin, 'f', -1, 64),
-			strconv.FormatFloat(d.RRMax, 'f', -1, 64),
-			strconv.Itoa(d.SnoreEpisodes),
-			strconv.FormatFloat(d.ApneaHypopnea, 'f', -1, 64),
-			s.Source,
+// totalSleepSec sums the sleep stages Withings reported, excluding
+// time awake. It returns nil when the device reported no stage at all,
+// rather than 0 — a watch that does not do stage detection has not
+// measured "zero sleep".
+//
+// Summing only the stages that are present is deliberate: a device that
+// reports light and deep but not REM still has a meaningful total, and
+// treating the missing stage as zero is the closest honest reading.
+func totalSleepSec(d sleepData) *int {
+	total := 0
+	any := false
+	for _, stage := range []*int{d.LightSleepDuration, d.DeepSleepDuration, d.REMSleepDuration} {
+		if stage == nil {
+			continue
 		}
-		if err := w.Write(row); err != nil {
-			return err
-		}
+		total += *stage
+		any = true
 	}
-	return nil
+	if !any {
+		return nil
+	}
+	return &total
+}
+
+// roundPtr rounds *p to n decimals, preserving nil.
+func roundPtr(p *float64, n int) *float64 {
+	if p == nil {
+		return nil
+	}
+	return numPtr(*p, n)
 }
 
 // deriveSleep polyfills a sleep start/end for a night that has no getsummary
@@ -208,7 +277,15 @@ func writeSleepCSV(series []sleepSeries) error {
 // consecutive quiet samples (watch off for charging). The longest qualifying
 // run ≥ 3h becomes the derived sleep session. Returns (nil, nil) when no
 // window qualifies or intraday has no samples.
-func deriveSleep(c *client.Client, date time.Time) (*sleepSeries, error) {
+//
+// The heuristic establishes exactly two things: a session span and a mean
+// heart rate. It cannot see sleep stages, wakeups, or latencies, so the
+// returned row leaves those `null` (#21). An earlier version assigned the
+// whole span to `lightsleepduration` so the CSV writer's
+// `(light+deep+rem)/60` total would add up, which made every derived row
+// report a measured-looking "deep 0, REM 0" and a total equal to light
+// sleep alone. The total is now its own field and the stages stay unknown.
+func deriveSleep(c *client.Client, date time.Time) (*sleepRow, error) {
 	loc := time.Local
 	day := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, loc)
 	winStart := day.AddDate(0, 0, -1).Add(18 * time.Hour)
@@ -329,92 +406,63 @@ func deriveSleep(c *client.Client, date time.Time) (*sleepSeries, error) {
 		return nil, nil
 	}
 
-	bestStart := best.start
-	bestEnd := best.end
-	bestDur := best.end - best.start
-	hrAvg := float64(best.hrSum) / float64(best.hrCount)
-
-	// Stuff total duration into lightsleepduration so the existing CSV writer's
-	// total_sleep_min = (light+deep+rem)/60 renders correctly. Derived rows
-	// have no stage breakdown, so all sleep time shows as "light".
-	dataObj := map[string]any{
-		"lightsleepduration": bestDur,
-		"hr_average":         hrAvg,
-	}
-	data, _ := json.Marshal(dataObj)
-
-	return &sleepSeries{
-		Timezone:  loc.String(),
-		StartDate: bestStart,
-		EndDate:   bestEnd,
-		Date:      date.Format("2006-01-02"),
-		Data:      json.RawMessage(data),
-		Source:    "derived",
+	dur := int(best.end - best.start)
+	return &sleepRow{
+		Date:          localMidnightRFC3339(date.Format("2006-01-02")),
+		CalendarDate:  date.Format("2006-01-02"),
+		Start:         time.Unix(best.start, 0).Local().Format(time.RFC3339),
+		End:           time.Unix(best.end, 0).Local().Format(time.RFC3339),
+		StartEpoch:    best.start,
+		EndEpoch:      best.end,
+		Timezone:      loc.String(),
+		TotalSleepSec: &dur,
+		HRAvg:         numPtr(float64(best.hrSum)/float64(best.hrCount), 1),
+		Source:        "derived",
 	}, nil
 }
 
 // writeSleepMarkdown emits one fitdown-style block per night. Stage breakdown,
 // score, RR, and snore lines only render when populated. Derived rows tag the
 // heading so polyfilled nights are visually distinct from real summaries.
-func writeSleepMarkdown(series []sleepSeries) error {
-	for _, s := range series {
-		var d struct {
-			Wake          int     `json:"wakeupduration"`
-			Light         int     `json:"lightsleepduration"`
-			Deep          int     `json:"deepsleepduration"`
-			REM           int     `json:"remsleepduration"`
-			ToSleep       int     `json:"durationtosleep"`
-			ToWakeup      int     `json:"durationtowakeup"`
-			WakeupCount   int     `json:"wakeupcount"`
-			SleepScore    int     `json:"sleep_score"`
-			HRAvg         float64 `json:"hr_average"`
-			HRMin         float64 `json:"hr_min"`
-			HRMax         float64 `json:"hr_max"`
-			RRAvg         float64 `json:"rr_average"`
-			RRMin         float64 `json:"rr_min"`
-			RRMax         float64 `json:"rr_max"`
-			SnoreEpisodes int     `json:"snoringepisodecount"`
-			ApneaHypopnea float64 `json:"apnea_hypopnea_index"`
-		}
-		_ = json.Unmarshal(s.Data, &d)
-
-		start := time.Unix(s.StartDate, 0).Local()
-		end := time.Unix(s.EndDate, 0).Local()
-		total := d.Light + d.Deep + d.REM
-
-		heading := fmt.Sprintf("Sleep %s", s.Date)
+func writeSleepMarkdown(rows []sleepRow) error {
+	for _, s := range rows {
+		heading := fmt.Sprintf("Sleep %s", s.CalendarDate)
 		if s.Source == "derived" {
 			heading += " (derived)"
 		}
 		fmt.Fprintf(os.Stdout, "%s\n\n", heading)
 		fmt.Fprintf(os.Stdout, "%s → %s (%s)\n",
-			start.Format("15:04"), end.Format("15:04"), fmtDur(total))
+			time.Unix(s.StartEpoch, 0).Local().Format("15:04"),
+			time.Unix(s.EndEpoch, 0).Local().Format("15:04"),
+			fmtDur(deref(s.TotalSleepSec)))
 
-		if d.HRAvg > 0 {
-			if d.HRMin > 0 || d.HRMax > 0 {
-				fmt.Fprintf(os.Stdout, "HR avg %s, %s-%s\n", fmtFloat1(d.HRAvg), fmtRound(d.HRMin), fmtRound(d.HRMax))
+		if hrAvg := deref(s.HRAvg); hrAvg > 0 {
+			if deref(s.HRMin) > 0 || deref(s.HRMax) > 0 {
+				fmt.Fprintf(os.Stdout, "HR avg %s, %s-%s\n",
+					fmtFloat1(hrAvg), fmtRound(deref(s.HRMin)), fmtRound(deref(s.HRMax)))
 			} else {
-				fmt.Fprintf(os.Stdout, "HR avg %s\n", fmtFloat1(d.HRAvg))
+				fmt.Fprintf(os.Stdout, "HR avg %s\n", fmtFloat1(hrAvg))
 			}
 		}
-		if d.Deep > 0 || d.REM > 0 {
+		if deref(s.DeepSec) > 0 || deref(s.REMSec) > 0 {
 			fmt.Fprintf(os.Stdout, "Light %s, deep %s, REM %s\n",
-				fmtDur(d.Light), fmtDur(d.Deep), fmtDur(d.REM))
+				fmtDur(deref(s.LightSec)), fmtDur(deref(s.DeepSec)), fmtDur(deref(s.REMSec)))
 		}
-		if d.SleepScore > 0 {
-			fmt.Fprintf(os.Stdout, "Score %d\n", d.SleepScore)
+		if score := deref(s.SleepScore); score > 0 {
+			fmt.Fprintf(os.Stdout, "Score %d\n", score)
 		}
-		if d.RRAvg > 0 {
-			fmt.Fprintf(os.Stdout, "RR avg %s, %s-%s\n", fmtFloat1(d.RRAvg), fmtRound(d.RRMin), fmtRound(d.RRMax))
+		if rrAvg := deref(s.RRAvg); rrAvg > 0 {
+			fmt.Fprintf(os.Stdout, "RR avg %s, %s-%s\n",
+				fmtFloat1(rrAvg), fmtRound(deref(s.RRMin)), fmtRound(deref(s.RRMax)))
 		}
-		if d.WakeupCount > 0 {
-			fmt.Fprintf(os.Stdout, "%d wakeups\n", d.WakeupCount)
+		if wakeups := deref(s.WakeupCount); wakeups > 0 {
+			fmt.Fprintf(os.Stdout, "%d wakeups\n", wakeups)
 		}
-		if d.ApneaHypopnea > 0 {
-			fmt.Fprintf(os.Stdout, "AHI %s\n", fmtNum(d.ApneaHypopnea))
+		if ahi := deref(s.ApneaHypopneaIndex); ahi > 0 {
+			fmt.Fprintf(os.Stdout, "AHI %s\n", fmtNum(ahi))
 		}
-		if d.SnoreEpisodes > 0 {
-			fmt.Fprintf(os.Stdout, "Snoring: %d episodes\n", d.SnoreEpisodes)
+		if episodes := deref(s.SnoreEpisodes); episodes > 0 {
+			fmt.Fprintf(os.Stdout, "Snoring: %d episodes\n", episodes)
 		}
 		fmt.Fprintln(os.Stdout)
 	}

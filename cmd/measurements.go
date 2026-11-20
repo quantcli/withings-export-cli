@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/csv"
 	"fmt"
 	"math"
 	"net/url"
@@ -60,13 +59,32 @@ type getmeasResponse struct {
 	Offset      int            `json:"offset"`
 }
 
+// measurementRow is the canonical §4 row for `measurements`, shared by
+// all three codecs — see cmd/rowcodec.go.
+//
+// `date` is a pre-formatted RFC3339 string rather than a time.Time so
+// that the one representation §2 requires is stated here instead of
+// delegated to Go's default marshaler (which emits RFC3339Nano, a
+// different layout from the other four subcommands when the instant
+// has sub-second precision).
+//
+// `device_id` is a pointer: it was `omitempty`, so the JSON key
+// vanished on rows with no device while the CSV column stayed, which
+// made the two codecs disagree about the key set for exactly those
+// rows. §4 wants the key present and the value `null`.
 type measurementRow struct {
-	Date     time.Time `json:"date"`
-	Type     string    `json:"type"`
-	TypeCode int       `json:"type_code"`
-	Value    float64   `json:"value"`
-	DeviceID string    `json:"device_id,omitempty"`
-	GrpID    int64     `json:"grp_id"`
+	Date     string  `json:"date"`
+	Type     string  `json:"type"`
+	TypeCode int     `json:"type_code"`
+	Value    float64 `json:"value"`
+	DeviceID *string `json:"device_id"`
+	GrpID    int64   `json:"grp_id"`
+
+	// ts is the row's instant, kept for sorting and for the markdown
+	// group heading. Unexported, so neither codec sees it: RFC3339
+	// strings do not sort correctly across a UTC-offset change, which
+	// a window spanning a DST boundary contains.
+	ts time.Time
 }
 
 var (
@@ -116,19 +134,30 @@ var measurementsCmd = &cobra.Command{
 			}
 			for _, g := range resp.Measuregrps {
 				t := time.Unix(g.Date, 0).Local()
+				var deviceID *string
+				if g.DeviceID != "" {
+					id := g.DeviceID
+					deviceID = &id
+				}
 				for _, m := range g.Measures {
-					value := float64(m.Value) * math.Pow10(m.Unit)
+					// value × 10^unit is where #26's float noise comes
+					// from: 72844 × 10⁻³ is not exactly representable,
+					// so it surfaces as 72.84400000000001. Withings
+					// stores at most 3 decimal places, so rounding to 3
+					// is lossless for real data and removes the tail.
+					value := round(float64(m.Value)*math.Pow10(m.Unit), 3)
 					name, ok := measureTypeNames[m.Type]
 					if !ok {
 						name = fmt.Sprintf("type_%d", m.Type)
 					}
 					rows = append(rows, measurementRow{
-						Date:     t,
+						Date:     t.Format(time.RFC3339),
 						Type:     name,
 						TypeCode: m.Type,
 						Value:    value,
-						DeviceID: g.DeviceID,
+						DeviceID: deviceID,
 						GrpID:    g.GrpID,
+						ts:       t,
 					})
 				}
 			}
@@ -138,38 +167,17 @@ var measurementsCmd = &cobra.Command{
 			params.Set("offset", strconv.Itoa(resp.Offset))
 		}
 
-		sort.Slice(rows, func(i, j int) bool { return rows[i].Date.Before(rows[j].Date) })
+		sort.Slice(rows, func(i, j int) bool { return rows[i].ts.Before(rows[j].ts) })
 
 		switch format {
 		case "json":
 			return printJSON(rows)
 		case "csv":
-			return writeMeasurementsCSV(rows)
+			return writeCSV(rows)
 		default:
 			return writeMeasurementsMarkdown(rows)
 		}
 	},
-}
-
-func writeMeasurementsCSV(rows []measurementRow) error {
-	w := csv.NewWriter(os.Stdout)
-	defer w.Flush()
-	if err := w.Write([]string{"date", "type", "type_code", "value", "device_id", "grp_id"}); err != nil {
-		return err
-	}
-	for _, r := range rows {
-		if err := w.Write([]string{
-			r.Date.Format(time.RFC3339),
-			r.Type,
-			strconv.Itoa(r.TypeCode),
-			strconv.FormatFloat(r.Value, 'f', -1, 64),
-			r.DeviceID,
-			strconv.FormatInt(r.GrpID, 10),
-		}); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // fmtMeasurement renders a measurement value with up to 3 decimal places,
@@ -198,7 +206,7 @@ func writeMeasurementsMarkdown(rows []measurementRow) error {
 	for _, r := range rows {
 		g, ok := groups[r.GrpID]
 		if !ok {
-			g = &group{date: r.Date}
+			g = &group{date: r.ts}
 			groups[r.GrpID] = g
 			order = append(order, r.GrpID)
 		}
