@@ -202,6 +202,15 @@ HR avg 76, 50-127
 
 **CSV (`--format csv`):** header row + one row per data point. Suitable for spreadsheets, Grafana, pandas, etc.
 
+`json` and `csv` are two encodings of **one** dataset: for a given subcommand they
+carry the same rows with the same field names in the same units, so you can
+prototype with `jq` and hand the same column names to pandas. Field names carry
+their unit (`distance_m`, `duration_sec`), durations are seconds, and `date` is
+RFC3339 with a UTC offset in every subcommand. A value the device did not
+measure is `null` in JSON and an empty cell in CSV — never `0`. This is
+[CONTRACT §4](https://github.com/quantcli/common/blob/main/CONTRACT.md#4-output-format),
+and it is enforced by tests on every pull request rather than by review.
+
 Example — average weight over the last year:
 ```sh
 withings-export measurements --since 1y --types 1 --format json \
