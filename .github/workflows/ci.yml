@@ -44,4 +44,30 @@ jobs:
         env:
           # Path the compat-tagged test reads from os.Getenv.
           WITHINGS_EXPORT_BIN: /tmp/withings-export
-        run: go test -tags=compat -run 'TestContractFormats|TestResolvedWindow' ./...
+        # No -run filter. This step used to name the entry points
+        # explicitly, which made adding a bundle a two-file change and
+        # failed quietly when only one of them was made: a new
+        # TestContract* function would compile, pass locally, and never
+        # run here. The compat tag already scopes the selection.
+        run: go test -tags=compat -v ./... 2>&1 | tee /tmp/compat.log
+
+      - name: assert the compat suite skipped nothing
+        # A compat bundle reports an unmet precondition as t.Skip with a
+        # named reason, not as a failure — correctly, because a skip is
+        # not a contract violation. But CONTRACT.md's status table reads
+        # a green `compat` check as machine attestation, and a skipped
+        # subtest attests nothing. Without this guard the table can keep
+        # claiming "machine" for a cell whose assertion stopped running:
+        # compat/parity, for instance, skips its key-set subtest when the
+        # stub yields fewer than two records, so a fixture edit alone
+        # would silently withdraw the attestation.
+        #
+        # So a skip fails the build. The fix is either to restore the
+        # precondition or to stop claiming the cell — both of which
+        # belong in a diff rather than in a log nobody reads.
+        run: |
+          if grep -E '^\s*--- SKIP' /tmp/compat.log; then
+            echo "::error::A compat subtest was skipped; see the reasons above. Either restore the precondition it needs, or drop the corresponding CONTRACT.md status-table claim in quantcli/common."
+            exit 1
+          fi
+          echo "No skipped subtests: every compat assertion ran."
