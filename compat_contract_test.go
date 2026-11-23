@@ -23,6 +23,7 @@ import (
 	"github.com/quantcli/common/compat"
 	"github.com/quantcli/common/compat/dates"
 	"github.com/quantcli/common/compat/formats"
+	"github.com/quantcli/common/compat/parity"
 	"github.com/quantcli/withings-export-cli/internal/stubapi"
 )
 
@@ -58,10 +59,53 @@ func TestContractFormats(t *testing.T) {
 	// CSVHasHeader only ever saw a header, and DefaultIsMarkdown
 	// compared two empty strings. With rows present all three assert
 	// against real output.
+	formats.RunContract(t, stubbedRunner(t, bin))
+}
+
+// TestContractParity runs common's compat/parity bundle — the §4
+// cross-codec half — against the built binary for all five
+// data-producing subcommands.
+//
+// This is the machine attestation behind CONTRACT.md's `json`/`csv`
+// cross-codec parity (§4) cell for withings. It asserts two things the
+// in-process cmd/parity_test.go cannot, because it drives the shipped
+// binary rather than the serializer functions: that no CSV column names
+// a field `--format json` does not emit, and that every record in one
+// json array carries the same top-level key set.
+//
+// It does not replace cmd/parity_test.go. See the note at the top of
+// that file for the division: the bundle cannot see the declared schema
+// (so a rename that lands in both codecs at once still passes here),
+// the per-field decimal budget, or the timestamp representation.
+func TestContractParity(t *testing.T) {
+	bin := os.Getenv("WITHINGS_EXPORT_BIN")
+	if bin == "" {
+		t.Skip("WITHINGS_EXPORT_BIN not set; skipping compat suite")
+	}
+	parity.RunCrossCodec(t, stubbedRunner(t, bin))
+}
+
+// stubbedRunner builds the compat.Runner the data-path bundles share.
+//
+// withings's data path requires a usable OAuth token plus a reachable
+// Withings API origin, neither of which a clean CI runner has.
+// internal/stubapi supplies both: a stub upstream the binary reaches
+// via WITHINGS_API_BASE, and a never-expired token in a scratch HOME so
+// auth.GetToken returns without touching the network.
+//
+// The stub returns *populated* fixtures rather than the empty Withings
+// envelope this file used to serve, which changes what the bundles
+// actually attest. Against an empty response every codec renders the
+// empty-result form, so JSONIsArray only ever saw `[]`, CSVHasHeader
+// only ever saw a header, and DefaultIsMarkdown compared two empty
+// strings — and compat/parity would skip outright, having no keys to
+// compare. With rows present all of them assert against real output.
+func stubbedRunner(t *testing.T, bin string) compat.Runner {
+	t.Helper()
 	stub := stubapi.New(t)
 	home := stubapi.WriteAuthToken(t)
 
-	formats.RunContract(t, compat.Runner{
+	return compat.Runner{
 		Binary: bin,
 		// withings is cobra-based: --format lives on each
 		// data-producing subcommand rather than the root binary.
@@ -72,7 +116,7 @@ func TestContractFormats(t *testing.T) {
 			"TZ=UTC",
 			"WITHINGS_API_BASE=" + stub.URL,
 		},
-	})
+	}
 }
 
 // TestResolvedWindow verifies local dates independently of upstream credentials.
