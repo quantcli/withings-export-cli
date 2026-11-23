@@ -364,6 +364,233 @@ func TestDerivedSleepRowsNullUnknownStages(t *testing.T) {
 	}
 }
 
+// recordCase pins §4's record-shape expectation for one fixture
+// record: which row fields must be `null`, which must carry a value,
+// and which must carry a real zero.
+type recordCase struct {
+	sub  string
+	name string                    // subtest name
+	what string                    // names the record in failure output
+	is   func(map[string]any) bool // locates it among the emitted rows
+	// null are the fields upstream did not report for this record.
+	// §4: present, and `null`.
+	null []string
+	// present are fields upstream did report. They exist to stop this
+	// test passing because *everything* went null — over-nulling is a
+	// §4 violation in the other direction, since a key whose value is
+	// always null is indistinguishable from one we never fill.
+	present []string
+	// zero are fields upstream reported as an explicit `0`. A real zero
+	// is data and must survive as `0`: a flat day, a workout the pause
+	// algorithm never paused. The pointer treatment must not turn these
+	// into `null` on the way out.
+	zero []string
+}
+
+// sparseRecords is the §4 record-shape table.
+//
+// Each subcommand's fixture carries a sparse record alongside its
+// populated one — a cheaper device, a manually logged session, an
+// unworn night — because that is the shape the rule exists for. The
+// field lists below mirror internal/stubapi exactly: if a fixture
+// changes which keys it omits, the matching list changes with it, which
+// puts the schema decision in the diff.
+//
+// `measurements` has no entry, and that is the audit result rather than
+// an omission. Its rows come from `measuregrps[].measures[]`, where a
+// metric the device did not measure produces no element and therefore
+// no row — absence there is a missing row, not a null cell, so the
+// subcommand has no upstream-omittable numeric. See the comment on
+// measurementRow.
+var sparseRecords = []recordCase{{
+	sub:  "activity",
+	name: "sparse-day",
+	what: "the sparse day: a tracker with no optical heart rate and no altimeter",
+	is:   func(r map[string]any) bool { return r["calendar_date"] == stubapi.ActivityDay2 },
+	null: []string{
+		"elevation_m", "hr_avg", "hr_min", "hr_max",
+		"hr_zone_0", "hr_zone_1", "hr_zone_2", "hr_zone_3",
+	},
+	present: []string{
+		"steps", "distance_m", "soft_sec", "moderate_sec", "active_sec",
+		"calories", "total_calories",
+	},
+	// The fixture reports `intense: 0` — a day with no intense minutes,
+	// which is a measurement.
+	zero: []string{"intense_sec"},
+}, {
+	sub:  "workouts",
+	name: "sparse-session",
+	what: "the sparse session: a manually logged walk from a scale-only account",
+	is:   func(r map[string]any) bool { return r["calendar_date"] == stubapi.ActivityDay2 },
+	null: []string{
+		"pause_duration_sec", "algo_pause_duration_sec",
+		"manual_calories", "manual_distance_m", "elevation_m",
+		"hr_avg", "hr_min", "hr_max",
+		"hr_zone_0", "hr_zone_1", "hr_zone_2", "hr_zone_3",
+		"spo2_avg_pct", "pool_laps", "pool_length_m", "strokes",
+		"device_id",
+	},
+	present: []string{
+		"duration_sec", "eff_duration_sec", "calories", "intensity",
+		"steps", "distance_m",
+	},
+}, {
+	sub:  "workouts",
+	name: "populated-session",
+	what: "the populated session: a run, every data field reported",
+	is:   func(r map[string]any) bool { return r["calendar_date"] == stubapi.ActivityDay },
+	present: []string{
+		"eff_duration_sec", "pause_duration_sec", "calories", "manual_calories",
+		"intensity", "steps", "distance_m", "manual_distance_m", "elevation_m",
+		"hr_avg", "hr_min", "hr_max", "spo2_avg_pct", "device_id",
+	},
+	// The run really has no laps, no strokes and no pool, and its pause
+	// algorithm never fired. Upstream sends all four as `0`, so `0` is
+	// what §4 requires here — this is the assertion that fails if the
+	// nullable treatment is implemented as "zero means absent".
+	zero: []string{"algo_pause_duration_sec", "pool_laps", "pool_length_m", "strokes"},
+}, {
+	sub:  "sleep",
+	name: "sparse-night",
+	what: "the sparse night: a mat that reports stages but no respiratory, snoring or HR analysis",
+	is:   func(r map[string]any) bool { return r["calendar_date"] == stubapi.ActivityDay2 },
+	null: []string{
+		"sleep_score", "hr_avg", "hr_min", "hr_max", "rr_avg", "rr_min", "rr_max",
+		"breathing_disturbances_intensity", "snoring_sec", "snore_episodes",
+		"apnea_hypopnea_index",
+	},
+	present: []string{
+		"id", "model", "total_sleep_sec", "light_sec", "deep_sec", "rem_sec",
+		"awake_sec", "time_to_sleep_sec", "time_to_wakeup_sec", "wakeup_count",
+	},
+}, {
+	sub:  "intraday",
+	name: "sparse-sample",
+	what: "the sparse sample: a tracker minute with no optical sensor and no barometer",
+	is: func(r map[string]any) bool {
+		return r["timestamp"] == float64(stubapi.IntradaySparseSampleAt)
+	},
+	null: []string{
+		"elevation_m", "heart_rate", "hrv_rmssd", "hrv_sdnn1", "hrv_quality", "spo2_auto",
+	},
+	present: []string{"duration_sec", "steps", "distance_m", "calories", "model", "model_id"},
+}}
+
+// TestSparseRecordsNullUnreportedFields is CONTRACT §4's record-shape
+// clause applied to the row structs: "A field with no value is present
+// and `null` ... not omitted."
+//
+// TestJSONAndCSVAgree above pins the *key set*, which is uniform
+// whether an unreported value renders as `null` or as `0` — so it
+// passes either way, and passed on the version of these row structs
+// that used value types for numerics the upstream may omit. That is the
+// gap this test closes. `"hr_min": 0` is not a missing value, it is a
+// false one: a resting heart rate of zero is not a plausible reading,
+// and `"elevation_m": 0` is worse because it *is* plausible, leaving a
+// consumer no way to tell a flat day from a device with no altimeter.
+//
+// It also pins the inverse, which is why `zero` exists: a reported zero
+// must survive as `0`. "Absent" and "zero" are two different facts and
+// this test fails if either is rendered as the other.
+//
+// cmd/sleep.go has read this way since #21 — the derived-row test
+// above is the same assertion for a different source of absence — so
+// `sleep` enters here as the passing control.
+func TestSparseRecordsNullUnreportedFields(t *testing.T) {
+	for _, c := range sparseRecords {
+		c := c
+		t.Run(c.sub+"/"+c.name, func(t *testing.T) {
+			env := stubEnv(t, false)
+			jsonRows := runJSON(t, env, c.sub)
+			header, csvRows := runCSV(t, env, c.sub)
+			if len(jsonRows) != len(csvRows) {
+				t.Fatalf("row count differs: json=%d csv=%d", len(jsonRows), len(csvRows))
+			}
+
+			// JSON and CSV emit rows in the same order — that is
+			// TestJSONAndCSVAgree's contract — so one index addresses
+			// the same record in both codecs.
+			idx := -1
+			for i, r := range jsonRows {
+				if c.is(r) {
+					idx = i
+					break
+				}
+			}
+			if idx < 0 {
+				t.Fatalf("fixture carries no record matching %s; this subtest would assert nothing", c.what)
+			}
+			row := jsonRows[idx]
+			col := make(map[string]int, len(header))
+			for i, name := range header {
+				col[name] = i
+			}
+			cell := func(t *testing.T, field string) (string, bool) {
+				t.Helper()
+				i, ok := col[field]
+				if !ok {
+					t.Errorf("csv header has no %q column", field)
+					return "", false
+				}
+				if i >= len(csvRows[idx]) {
+					t.Errorf("csv row %d has %d cells, %q is column %d", idx, len(csvRows[idx]), field, i)
+					return "", false
+				}
+				return csvRows[idx][i], true
+			}
+
+			for _, k := range c.null {
+				v, ok := row[k]
+				if !ok {
+					t.Errorf("%s: json has no %q key; §4 keeps the key and nulls the value", c.what, k)
+					continue
+				}
+				if v != nil {
+					t.Errorf("%s: json %q is %v, want null — upstream did not report it, so that value reads as a measurement it never took",
+						c.what, k, v)
+				}
+				if got, ok := cell(t, k); ok && got != "" {
+					t.Errorf("%s: csv %q is %q, want an empty cell", c.what, k, got)
+				}
+			}
+
+			for _, k := range c.present {
+				v, ok := row[k]
+				if !ok {
+					t.Errorf("%s: json has no %q key at all", c.what, k)
+					continue
+				}
+				if v == nil {
+					t.Errorf("%s: json %q is null, but upstream reported it", c.what, k)
+				}
+				if got, ok := cell(t, k); ok && got == "" {
+					t.Errorf("%s: csv %q is an empty cell, but upstream reported it", c.what, k)
+				}
+			}
+
+			for _, k := range c.zero {
+				v, ok := row[k]
+				if !ok {
+					t.Errorf("%s: json has no %q key at all", c.what, k)
+					continue
+				}
+				if v == nil {
+					t.Errorf("%s: json %q is null, but upstream reported an explicit 0; a measured zero is data",
+						c.what, k)
+					continue
+				}
+				if f, isNum := v.(float64); !isNum || f != 0 {
+					t.Errorf("%s: json %q is %v, want 0", c.what, k, v)
+				}
+				if got, ok := cell(t, k); ok && got != "0" {
+					t.Errorf("%s: csv %q is %q, want %q", c.what, k, got, "0")
+				}
+			}
+		})
+	}
+}
+
 // --- harness ---------------------------------------------------------
 
 // stubEnv starts a stub API and returns the environment that points the

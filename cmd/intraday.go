@@ -24,36 +24,58 @@ const intradayWindow = 24 * time.Hour
 // call `datetime` and the JSON codec did not emit at all. The epoch
 // `timestamp` is kept alongside it: it is zone-agnostic, which is
 // genuinely useful for bucketing, and `prime` already advertised it.
+//
+// `date` and `timestamp` are the only non-nullable fields, because both
+// come from the series *key* — the one thing every sample has.
+// Everything else is per-sample and device-dependent, so it is a
+// pointer and renders `null` where the sample did not carry it.
+// Intraday is where that matters most: it is the sparsest surface in
+// the CLI, since which metrics a given minute carries depends on what
+// the watch was doing. A sample with no optical reading used to emit
+// `"heart_rate": 0` and `"spo2_auto": 0` — values that are not merely
+// absent but physiologically impossible, and that a consumer averaging
+// a day of samples had no way to exclude (CONTRACT §4, record shape).
 type intradayRow struct {
-	Date        string  `json:"date"`
-	Timestamp   int64   `json:"timestamp"`
-	DurationSec int     `json:"duration_sec"`
-	Steps       int     `json:"steps"`
-	DistanceM   float64 `json:"distance_m"`
-	ElevationM  float64 `json:"elevation_m"`
-	Calories    float64 `json:"calories"`
-	HeartRate   int     `json:"heart_rate"`
-	HRVRMSSD    float64 `json:"hrv_rmssd"`
-	HRVSDNN1    float64 `json:"hrv_sdnn1"`
-	HRVQuality  int     `json:"hrv_quality"`
-	SpO2Auto    float64 `json:"spo2_auto"`
-	Model       string  `json:"model"`
-	ModelID     int     `json:"model_id"`
+	Date        string   `json:"date"`
+	Timestamp   int64    `json:"timestamp"`
+	DurationSec *int     `json:"duration_sec"`
+	Steps       *int     `json:"steps"`
+	DistanceM   *float64 `json:"distance_m"`
+	ElevationM  *float64 `json:"elevation_m"`
+	Calories    *float64 `json:"calories"`
+	HeartRate   *int     `json:"heart_rate"`
+	HRVRMSSD    *float64 `json:"hrv_rmssd"`
+	HRVSDNN1    *float64 `json:"hrv_sdnn1"`
+	HRVQuality  *int     `json:"hrv_quality"`
+	SpO2Auto    *float64 `json:"spo2_auto"`
+	Model       *string  `json:"model"`
+	ModelID     *int     `json:"model_id"`
 }
 
+// intradayPayload is one upstream sample: the value side of the
+// `series` map. Every field is a pointer for the reason
+// cmd/activity.go's activityDay sets out — the API sends the subset of
+// `data_fields` this particular sample has.
+//
+// `model`/`model_id` are the pair worth naming, because they are not in
+// the requested `data_fields` at all; the API attaches them to a sample
+// on its own, and does not always have them. They are pointers anyway,
+// because an unknown device must read as `null` and not as the empty
+// string: §4 is explicit that an absent value is "never `""`, never
+// `0`".
 type intradayPayload struct {
-	Duration   int     `json:"duration"`
-	Steps      int     `json:"steps"`
-	Distance   float64 `json:"distance"`
-	Elevation  float64 `json:"elevation"`
-	Calories   float64 `json:"calories"`
-	HeartRate  int     `json:"heart_rate"`
-	HRVQuality int     `json:"hrv_quality"`
-	RMSSD      float64 `json:"rmssd"`
-	SDNN1      float64 `json:"sdnn1"`
-	SpO2       float64 `json:"spo2_auto"`
-	Model      string  `json:"model"`
-	ModelID    int     `json:"model_id"`
+	Duration   *int     `json:"duration"`
+	Steps      *int     `json:"steps"`
+	Distance   *float64 `json:"distance"`
+	Elevation  *float64 `json:"elevation"`
+	Calories   *float64 `json:"calories"`
+	HeartRate  *int     `json:"heart_rate"`
+	HRVQuality *int     `json:"hrv_quality"`
+	RMSSD      *float64 `json:"rmssd"`
+	SDNN1      *float64 `json:"sdnn1"`
+	SpO2       *float64 `json:"spo2_auto"`
+	Model      *string  `json:"model"`
+	ModelID    *int     `json:"model_id"`
 }
 
 type intradayResponse struct {
@@ -68,14 +90,14 @@ func (p intradayPayload) row(ts int64) intradayRow {
 		Timestamp:   ts,
 		DurationSec: p.Duration,
 		Steps:       p.Steps,
-		DistanceM:   round(p.Distance, 2),
-		ElevationM:  round(p.Elevation, 2),
-		Calories:    round(p.Calories, 1),
+		DistanceM:   roundPtr(p.Distance, 2),
+		ElevationM:  roundPtr(p.Elevation, 2),
+		Calories:    roundPtr(p.Calories, 1),
 		HeartRate:   p.HeartRate,
-		HRVRMSSD:    round(p.RMSSD, 2),
-		HRVSDNN1:    round(p.SDNN1, 2),
+		HRVRMSSD:    roundPtr(p.RMSSD, 2),
+		HRVSDNN1:    roundPtr(p.SDNN1, 2),
 		HRVQuality:  p.HRVQuality,
-		SpO2Auto:    round(p.SpO2, 1),
+		SpO2Auto:    roundPtr(p.SpO2, 1),
 		Model:       p.Model,
 		ModelID:     p.ModelID,
 	}
@@ -176,26 +198,26 @@ func writeIntradayMarkdown(samples []intradayRow) error {
 			lastDate = date
 		}
 		fmt.Fprint(os.Stdout, ts.Format("15:04:05"))
-		if s.HeartRate > 0 {
-			fmt.Fprintf(os.Stdout, " HR %d", s.HeartRate)
+		if hr := deref(s.HeartRate); hr > 0 {
+			fmt.Fprintf(os.Stdout, " HR %d", hr)
 		}
-		if s.HRVRMSSD > 0 {
-			fmt.Fprintf(os.Stdout, " rmssd %s", fmtNum(s.HRVRMSSD))
+		if rmssd := deref(s.HRVRMSSD); rmssd > 0 {
+			fmt.Fprintf(os.Stdout, " rmssd %s", fmtNum(rmssd))
 		}
-		if s.HRVSDNN1 > 0 {
-			fmt.Fprintf(os.Stdout, " sdnn1 %s", fmtNum(s.HRVSDNN1))
+		if sdnn1 := deref(s.HRVSDNN1); sdnn1 > 0 {
+			fmt.Fprintf(os.Stdout, " sdnn1 %s", fmtNum(sdnn1))
 		}
-		if s.SpO2Auto > 0 {
-			fmt.Fprintf(os.Stdout, " spo2 %s", fmtNum(s.SpO2Auto))
+		if spo2 := deref(s.SpO2Auto); spo2 > 0 {
+			fmt.Fprintf(os.Stdout, " spo2 %s", fmtNum(spo2))
 		}
-		if s.Steps > 0 {
-			fmt.Fprintf(os.Stdout, " %d steps", s.Steps)
+		if steps := deref(s.Steps); steps > 0 {
+			fmt.Fprintf(os.Stdout, " %d steps", steps)
 		}
-		if s.DistanceM > 0 {
-			fmt.Fprintf(os.Stdout, " %sm", fmtNum(s.DistanceM))
+		if distance := deref(s.DistanceM); distance > 0 {
+			fmt.Fprintf(os.Stdout, " %sm", fmtNum(distance))
 		}
-		if s.Calories > 0 {
-			fmt.Fprintf(os.Stdout, " %s cal", fmtNum(s.Calories))
+		if calories := deref(s.Calories); calories > 0 {
+			fmt.Fprintf(os.Stdout, " %s cal", fmtNum(calories))
 		}
 		fmt.Fprintln(os.Stdout)
 	}

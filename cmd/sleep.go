@@ -260,14 +260,6 @@ func totalSleepSec(d sleepData) *int {
 	return &total
 }
 
-// roundPtr rounds *p to n decimals, preserving nil.
-func roundPtr(p *float64, n int) *float64 {
-	if p == nil {
-		return nil
-	}
-	return numPtr(*p, n)
-}
-
 // deriveSleep polyfills a sleep start/end for a night that has no getsummary
 // record, by finding the longest contiguous "quiet" run of intraday samples.
 //
@@ -313,7 +305,10 @@ func deriveSleep(c *client.Client, date time.Time) (*sleepRow, error) {
 		if err != nil {
 			continue
 		}
-		samples = append(samples, sample{ts: ts, hr: p.HeartRate, steps: p.Steps})
+		// deref is right here: the run detection below already reads a
+		// zero heart rate as "this sample carries no reading", which is
+		// what an absent one means too.
+		samples = append(samples, sample{ts: ts, hr: deref(p.HeartRate), steps: deref(p.Steps)})
 	}
 	sort.Slice(samples, func(i, j int) bool { return samples[i].ts < samples[j].ts })
 	if len(samples) == 0 {

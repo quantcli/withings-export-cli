@@ -72,6 +72,22 @@ type getmeasResponse struct {
 // vanished on rows with no device while the CSV column stayed, which
 // made the two codecs disagree about the key set for exactly those
 // rows. §4 wants the key present and the value `null`.
+//
+// `value` is the one §4-nullable-looking field that is deliberately
+// *not* a pointer, and the reason is structural rather than a judgement
+// about this upstream. `measurements` does not ask getmeas for a field
+// set the way the other four subcommands ask for `data_fields`: it
+// reads `measuregrps[].measures[]`, where each element is one taken
+// measurement carrying its own `type`, `unit` and `value`. A metric the
+// scale did not measure produces no element, so there is no row for it
+// — absence is a missing *row*, not a null cell, and a row that exists
+// always has a value. The same goes for `type`/`type_code`/`grp_id`,
+// which this file derives from the element and its group.
+//
+// That is the audit item 5 of QUA-114 asked for, recorded so the next
+// reader does not have to redo it: `measurements` has no
+// upstream-omittable numeric, and needed no change when `activity`,
+// `workouts` and `intraday` moved to pointers.
 type measurementRow struct {
 	Date     string  `json:"date"`
 	Type     string  `json:"type"`

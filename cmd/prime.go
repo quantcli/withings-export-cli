@@ -71,8 +71,14 @@ GOTCHAS
     and intraday 'timestamp' fields are zone-agnostic Unix seconds.
   - 'intraday' is a firehose — wide windows take minutes.
   - Withings rate-limits aggressive callers (HTTP 601). 'sleep --derive' throttles itself.
-  - Sleep score / apnea fields appear only on supported devices; they are
-    null (not 0) on a device that does not report them.
+  - Which fields a device reports varies: sleep score and apnea need
+    supported hardware, hr_* and hr_zone_* need an optical sensor,
+    elevation_m needs a barometer, and an intraday sample carries only
+    what that minute recorded. All of those read null (not 0) when
+    Withings did not send them, in every subcommand. The one case this
+    cannot fix is an upstream that sends a literal 0 for something it
+    never measured: nothing in the response distinguishes that from a
+    real 0, so it stays 0.
   - 'sleep --derive' rows carry source="derived" and know only the session
     span and mean heart rate. Every stage, latency and count is null.
   - 'workouts.category' is the name string; 'category_code' is the integer.

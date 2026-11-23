@@ -179,6 +179,20 @@ func numPtr(v float64, n int) *float64 {
 // value is known.
 func intPtr(v int) *int { return &v }
 
+// roundPtr rounds *p to n decimals, preserving nil.
+//
+// It is the bridge between the two halves of §4 for a nullable number:
+// the decimal budget applies to the value, and nil stays nil instead of
+// collapsing into a rounded zero. Every row builder that copies a
+// `data_fields` float out of an upstream struct goes through it, which
+// is why it lives here rather than beside its first caller.
+func roundPtr(p *float64, n int) *float64 {
+	if p == nil {
+		return nil
+	}
+	return numPtr(*p, n)
+}
+
 // deref returns *p, or 0 when p is nil. Used by the markdown renderers,
 // which suppress zero-valued lines anyway and so need no null handling.
 func deref[T int | float64](p *T) T {

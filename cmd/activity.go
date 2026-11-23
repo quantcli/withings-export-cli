@@ -12,25 +12,47 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// activityDay is the upstream day record.
+//
+// `date` and `timezone` are envelope fields — the API sends them on
+// every day it returns. Everything below them is requested through
+// `data_fields`, which makes it optional *by construction*: Withings
+// answers with the subset the user's devices actually recorded, so a
+// tracker with no optical sensor and no barometer sends no `hr_*` block
+// and no `elevation` at all.
+//
+// The pointers are therefore a rule rather than a per-field judgement
+// call: envelope fields are values, `data_fields` fields are pointers.
+// Decoding an omitted field into a value type makes "my device does not
+// measure this" indistinguishable from "this was zero" — the mistake
+// cmd/sleep.go's sleepData already documents, and the one CONTRACT §4's
+// record-shape clause forbids ("A field with no value is present and
+// `null` ... not omitted").
+//
+// The one thing this cannot separate is an upstream that sends an
+// explicit `0` for a metric its device never measured: that arrives
+// non-nil and renders as `0`, because nothing in the response
+// distinguishes it from a real zero. Recorded here rather than guessed
+// at — inventing an absence is as wrong as inventing a measurement.
 type activityDay struct {
-	Date          string  `json:"date"`
-	Timezone      string  `json:"timezone"`
-	Steps         int     `json:"steps"`
-	Distance      float64 `json:"distance"`
-	Elevation     float64 `json:"elevation"`
-	Soft          int     `json:"soft"`
-	Moderate      int     `json:"moderate"`
-	Intense       int     `json:"intense"`
-	Active        int     `json:"active"`
-	Calories      float64 `json:"calories"`
-	TotalCalories float64 `json:"totalcalories"`
-	HRAvg         float64 `json:"hr_average"`
-	HRMin         float64 `json:"hr_min"`
-	HRMax         float64 `json:"hr_max"`
-	HRZone0       int     `json:"hr_zone_0"`
-	HRZone1       int     `json:"hr_zone_1"`
-	HRZone2       int     `json:"hr_zone_2"`
-	HRZone3       int     `json:"hr_zone_3"`
+	Date          string   `json:"date"`
+	Timezone      string   `json:"timezone"`
+	Steps         *int     `json:"steps"`
+	Distance      *float64 `json:"distance"`
+	Elevation     *float64 `json:"elevation"`
+	Soft          *int     `json:"soft"`
+	Moderate      *int     `json:"moderate"`
+	Intense       *int     `json:"intense"`
+	Active        *int     `json:"active"`
+	Calories      *float64 `json:"calories"`
+	TotalCalories *float64 `json:"totalcalories"`
+	HRAvg         *float64 `json:"hr_average"`
+	HRMin         *float64 `json:"hr_min"`
+	HRMax         *float64 `json:"hr_max"`
+	HRZone0       *int     `json:"hr_zone_0"`
+	HRZone1       *int     `json:"hr_zone_1"`
+	HRZone2       *int     `json:"hr_zone_2"`
+	HRZone3       *int     `json:"hr_zone_3"`
 }
 
 // activityRow is the canonical §4 row for `activity`, shared by all
@@ -41,26 +63,34 @@ type activityDay struct {
 // day-keyed row is local midnight; `calendar_date` is the day label
 // itself. Splitting them is what lets `date` mean one thing across all
 // five subcommands (§2, §4) without losing the plain day string.
+//
+// Every measured quantity is a pointer, carrying activityDay's
+// nil-means-absent straight through to the wire: `null` in JSON, an
+// empty cell in CSV. `date`, `calendar_date` and `timezone` are the
+// only non-nullable fields, because a day record that lacks them is not
+// a day record. `hr_avg` being nullable here is also what makes it one
+// JSON type across `activity` and `sleep` — the §4 scalar-typing clause
+// #27 was filed about.
 type activityRow struct {
-	Date          string  `json:"date"`
-	CalendarDate  string  `json:"calendar_date"`
-	Timezone      string  `json:"timezone"`
-	Steps         int     `json:"steps"`
-	DistanceM     float64 `json:"distance_m"`
-	ElevationM    float64 `json:"elevation_m"`
-	SoftSec       int     `json:"soft_sec"`
-	ModerateSec   int     `json:"moderate_sec"`
-	IntenseSec    int     `json:"intense_sec"`
-	ActiveSec     int     `json:"active_sec"`
-	Calories      float64 `json:"calories"`
-	TotalCalories float64 `json:"total_calories"`
-	HRAvg         float64 `json:"hr_avg"`
-	HRMin         float64 `json:"hr_min"`
-	HRMax         float64 `json:"hr_max"`
-	HRZone0       int     `json:"hr_zone_0"`
-	HRZone1       int     `json:"hr_zone_1"`
-	HRZone2       int     `json:"hr_zone_2"`
-	HRZone3       int     `json:"hr_zone_3"`
+	Date          string   `json:"date"`
+	CalendarDate  string   `json:"calendar_date"`
+	Timezone      string   `json:"timezone"`
+	Steps         *int     `json:"steps"`
+	DistanceM     *float64 `json:"distance_m"`
+	ElevationM    *float64 `json:"elevation_m"`
+	SoftSec       *int     `json:"soft_sec"`
+	ModerateSec   *int     `json:"moderate_sec"`
+	IntenseSec    *int     `json:"intense_sec"`
+	ActiveSec     *int     `json:"active_sec"`
+	Calories      *float64 `json:"calories"`
+	TotalCalories *float64 `json:"total_calories"`
+	HRAvg         *float64 `json:"hr_avg"`
+	HRMin         *float64 `json:"hr_min"`
+	HRMax         *float64 `json:"hr_max"`
+	HRZone0       *int     `json:"hr_zone_0"`
+	HRZone1       *int     `json:"hr_zone_1"`
+	HRZone2       *int     `json:"hr_zone_2"`
+	HRZone3       *int     `json:"hr_zone_3"`
 }
 
 type activityResponse struct {
@@ -147,17 +177,17 @@ func (d activityDay) row() activityRow {
 		CalendarDate:  d.Date,
 		Timezone:      d.Timezone,
 		Steps:         d.Steps,
-		DistanceM:     round(d.Distance, 2),
-		ElevationM:    round(d.Elevation, 2),
+		DistanceM:     roundPtr(d.Distance, 2),
+		ElevationM:    roundPtr(d.Elevation, 2),
 		SoftSec:       d.Soft,
 		ModerateSec:   d.Moderate,
 		IntenseSec:    d.Intense,
 		ActiveSec:     d.Active,
-		Calories:      round(d.Calories, 1),
-		TotalCalories: round(d.TotalCalories, 1),
-		HRAvg:         round(d.HRAvg, 1),
-		HRMin:         round(d.HRMin, 0),
-		HRMax:         round(d.HRMax, 0),
+		Calories:      roundPtr(d.Calories, 1),
+		TotalCalories: roundPtr(d.TotalCalories, 1),
+		HRAvg:         roundPtr(d.HRAvg, 1),
+		HRMin:         roundPtr(d.HRMin, 0),
+		HRMax:         roundPtr(d.HRMax, 0),
 		HRZone0:       d.HRZone0,
 		HRZone1:       d.HRZone1,
 		HRZone2:       d.HRZone2,
@@ -167,24 +197,33 @@ func (d activityDay) row() activityRow {
 
 // writeActivityMarkdown emits one fitdown-style block per day. Empty/zero
 // fields are dropped to keep output tight.
+//
+// deref collapses an absent value to zero, which is exactly the right
+// reading here: markdown already suppresses zero-valued lines, so an
+// unreported metric and a zero one are both simply not printed. The
+// distinction §4 cares about lives in the structured codecs, which
+// cannot omit a field and so say `null` instead.
 func writeActivityMarkdown(days []activityRow) error {
 	for _, d := range days {
 		fmt.Fprintf(os.Stdout, "Activity %s\n\n", d.CalendarDate)
-		if d.Steps > 0 || d.DistanceM > 0 {
-			fmt.Fprintf(os.Stdout, "%d steps, %.2f km\n", d.Steps, d.DistanceM/1000)
+		steps, distance := deref(d.Steps), deref(d.DistanceM)
+		if steps > 0 || distance > 0 {
+			fmt.Fprintf(os.Stdout, "%d steps, %.2f km\n", steps, distance/1000)
 		}
-		if d.Calories > 0 || d.TotalCalories > 0 {
-			fmt.Fprintf(os.Stdout, "%s cal active, %s total\n", fmtRound(d.Calories), fmtRound(d.TotalCalories))
+		calories, totalCalories := deref(d.Calories), deref(d.TotalCalories)
+		if calories > 0 || totalCalories > 0 {
+			fmt.Fprintf(os.Stdout, "%s cal active, %s total\n", fmtRound(calories), fmtRound(totalCalories))
 		}
-		if d.HRAvg > 0 {
-			fmt.Fprintf(os.Stdout, "HR avg %s, %s-%s\n", fmtRound(d.HRAvg), fmtRound(d.HRMin), fmtRound(d.HRMax))
+		if hrAvg := deref(d.HRAvg); hrAvg > 0 {
+			fmt.Fprintf(os.Stdout, "HR avg %s, %s-%s\n",
+				fmtRound(hrAvg), fmtRound(deref(d.HRMin)), fmtRound(deref(d.HRMax)))
 		}
-		if d.ActiveSec > 0 {
+		if activeSec := deref(d.ActiveSec); activeSec > 0 {
 			fmt.Fprintf(os.Stdout, "Active %s — %s soft, %s moderate, %s intense\n",
-				fmtDur(d.ActiveSec), fmtDur(d.SoftSec), fmtDur(d.ModerateSec), fmtDur(d.IntenseSec))
+				fmtDur(activeSec), fmtDur(deref(d.SoftSec)), fmtDur(deref(d.ModerateSec)), fmtDur(deref(d.IntenseSec)))
 		}
-		if d.ElevationM > 0 {
-			fmt.Fprintf(os.Stdout, "%s m elevation\n", fmtRound(d.ElevationM))
+		if elevation := deref(d.ElevationM); elevation > 0 {
+			fmt.Fprintf(os.Stdout, "%s m elevation\n", fmtRound(elevation))
 		}
 		fmt.Fprintln(os.Stdout)
 	}

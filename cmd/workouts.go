@@ -86,28 +86,46 @@ type workoutSeries struct {
 // field existing — while `--format csv` surfaced a hand-picked subset
 // under different names. Decoding into a declared struct makes the row
 // schema fixed and the same in both codecs.
+//
+// Every field is a pointer, for the reason cmd/activity.go's
+// activityDay spells out: this struct *is* the `data_fields` set, so
+// which keys arrive is a property of the user's device and account
+// rather than of the request. A manually logged walk carries no
+// heart-rate block, a run carries no pool fields, and a scale-only
+// account carries no device id. Value types turned each of those
+// absences into a measured-looking `0` — the thing §4's record-shape
+// clause names directly: a field with no value is present and `null`.
+//
+// The pool fields are the case where upstream is not consistent, and it
+// is worth writing down rather than discovering twice. A non-swim
+// workout can arrive with `pool_laps`/`strokes`/`pool_length` as an
+// explicit `0` (that is the populated fixture in internal/stubapi) or
+// with them omitted entirely (the sparse one). Only the second is
+// recoverable as `null`; an explicit `0` is indistinguishable from a
+// measured one in the response and stays `0`. Pointers get the honest
+// answer wherever the response carries one, which is as far as it goes.
 type workoutData struct {
-	Calories          float64 `json:"calories"`
-	EffDuration       int     `json:"effduration"`
-	Intensity         int     `json:"intensity"`
-	ManualDistance    float64 `json:"manual_distance"`
-	ManualCalories    float64 `json:"manual_calories"`
-	HRAvg             float64 `json:"hr_average"`
-	HRMin             float64 `json:"hr_min"`
-	HRMax             float64 `json:"hr_max"`
-	HRZone0           int     `json:"hr_zone_0"`
-	HRZone1           int     `json:"hr_zone_1"`
-	HRZone2           int     `json:"hr_zone_2"`
-	HRZone3           int     `json:"hr_zone_3"`
-	PauseDuration     int     `json:"pause_duration"`
-	AlgoPauseDuration int     `json:"algo_pause_duration"`
-	SpO2Average       float64 `json:"spo2_average"`
-	Steps             int     `json:"steps"`
-	Distance          float64 `json:"distance"`
-	Elevation         float64 `json:"elevation"`
-	PoolLaps          int     `json:"pool_laps"`
-	Strokes           int     `json:"strokes"`
-	PoolLength        float64 `json:"pool_length"`
+	Calories          *float64 `json:"calories"`
+	EffDuration       *int     `json:"effduration"`
+	Intensity         *int     `json:"intensity"`
+	ManualDistance    *float64 `json:"manual_distance"`
+	ManualCalories    *float64 `json:"manual_calories"`
+	HRAvg             *float64 `json:"hr_average"`
+	HRMin             *float64 `json:"hr_min"`
+	HRMax             *float64 `json:"hr_max"`
+	HRZone0           *int     `json:"hr_zone_0"`
+	HRZone1           *int     `json:"hr_zone_1"`
+	HRZone2           *int     `json:"hr_zone_2"`
+	HRZone3           *int     `json:"hr_zone_3"`
+	PauseDuration     *int     `json:"pause_duration"`
+	AlgoPauseDuration *int     `json:"algo_pause_duration"`
+	SpO2Average       *float64 `json:"spo2_average"`
+	Steps             *int     `json:"steps"`
+	Distance          *float64 `json:"distance"`
+	Elevation         *float64 `json:"elevation"`
+	PoolLaps          *int     `json:"pool_laps"`
+	Strokes           *int     `json:"strokes"`
+	PoolLength        *float64 `json:"pool_length"`
 }
 
 // workoutRow is the canonical §4 row for `workouts`, shared by all
@@ -120,42 +138,51 @@ type workoutData struct {
 // and `/60` is lossy — the 45m01s fixture in internal/stubapi exists to
 // keep that honest. Human-friendly durations stay in markdown, which is
 // where display formatting belongs.
+//
+// The non-nullable fields are exactly the ones the workout record
+// itself carries — its id, its span, its category, its timezone, its
+// device model — plus `duration_sec`, which this file computes from
+// `enddate - startdate` and so always knows. Everything sourced from
+// `data_fields` is a pointer and reaches the wire as `null` when
+// upstream did not report it. `hr_avg` nullable here is also what keeps
+// it one JSON type across `workouts`, `activity` and `sleep` (§4
+// scalar typing, #27).
 type workoutRow struct {
-	Date                 string  `json:"date"`
-	CalendarDate         string  `json:"calendar_date"`
-	Start                string  `json:"start"`
-	End                  string  `json:"end"`
-	StartEpoch           int64   `json:"start_epoch"`
-	EndEpoch             int64   `json:"end_epoch"`
-	ID                   int64   `json:"id"`
-	Timezone             string  `json:"timezone"`
-	Model                int     `json:"model"`
-	Attrib               int     `json:"attrib"`
-	Category             string  `json:"category"`
-	CategoryCode         int     `json:"category_code"`
-	DurationSec          int     `json:"duration_sec"`
-	EffDurationSec       int     `json:"eff_duration_sec"`
-	PauseDurationSec     int     `json:"pause_duration_sec"`
-	AlgoPauseDurationSec int     `json:"algo_pause_duration_sec"`
-	Calories             float64 `json:"calories"`
-	ManualCalories       float64 `json:"manual_calories"`
-	Intensity            int     `json:"intensity"`
-	Steps                int     `json:"steps"`
-	DistanceM            float64 `json:"distance_m"`
-	ManualDistanceM      float64 `json:"manual_distance_m"`
-	ElevationM           float64 `json:"elevation_m"`
-	HRAvg                float64 `json:"hr_avg"`
-	HRMin                float64 `json:"hr_min"`
-	HRMax                float64 `json:"hr_max"`
-	HRZone0              int     `json:"hr_zone_0"`
-	HRZone1              int     `json:"hr_zone_1"`
-	HRZone2              int     `json:"hr_zone_2"`
-	HRZone3              int     `json:"hr_zone_3"`
-	SpO2AvgPct           float64 `json:"spo2_avg_pct"`
-	PoolLaps             int     `json:"pool_laps"`
-	PoolLengthM          float64 `json:"pool_length_m"`
-	Strokes              int     `json:"strokes"`
-	DeviceID             *string `json:"device_id"`
+	Date                 string   `json:"date"`
+	CalendarDate         string   `json:"calendar_date"`
+	Start                string   `json:"start"`
+	End                  string   `json:"end"`
+	StartEpoch           int64    `json:"start_epoch"`
+	EndEpoch             int64    `json:"end_epoch"`
+	ID                   int64    `json:"id"`
+	Timezone             string   `json:"timezone"`
+	Model                int      `json:"model"`
+	Attrib               int      `json:"attrib"`
+	Category             string   `json:"category"`
+	CategoryCode         int      `json:"category_code"`
+	DurationSec          int      `json:"duration_sec"`
+	EffDurationSec       *int     `json:"eff_duration_sec"`
+	PauseDurationSec     *int     `json:"pause_duration_sec"`
+	AlgoPauseDurationSec *int     `json:"algo_pause_duration_sec"`
+	Calories             *float64 `json:"calories"`
+	ManualCalories       *float64 `json:"manual_calories"`
+	Intensity            *int     `json:"intensity"`
+	Steps                *int     `json:"steps"`
+	DistanceM            *float64 `json:"distance_m"`
+	ManualDistanceM      *float64 `json:"manual_distance_m"`
+	ElevationM           *float64 `json:"elevation_m"`
+	HRAvg                *float64 `json:"hr_avg"`
+	HRMin                *float64 `json:"hr_min"`
+	HRMax                *float64 `json:"hr_max"`
+	HRZone0              *int     `json:"hr_zone_0"`
+	HRZone1              *int     `json:"hr_zone_1"`
+	HRZone2              *int     `json:"hr_zone_2"`
+	HRZone3              *int     `json:"hr_zone_3"`
+	SpO2AvgPct           *float64 `json:"spo2_avg_pct"`
+	PoolLaps             *int     `json:"pool_laps"`
+	PoolLengthM          *float64 `json:"pool_length_m"`
+	Strokes              *int     `json:"strokes"`
+	DeviceID             *string  `json:"device_id"`
 }
 
 type workoutsResponse struct {
@@ -196,23 +223,23 @@ func (s workoutSeries) row() workoutRow {
 		EffDurationSec:       d.EffDuration,
 		PauseDurationSec:     d.PauseDuration,
 		AlgoPauseDurationSec: d.AlgoPauseDuration,
-		Calories:             round(d.Calories, 1),
-		ManualCalories:       round(d.ManualCalories, 1),
+		Calories:             roundPtr(d.Calories, 1),
+		ManualCalories:       roundPtr(d.ManualCalories, 1),
 		Intensity:            d.Intensity,
 		Steps:                d.Steps,
-		DistanceM:            round(d.Distance, 2),
-		ManualDistanceM:      round(d.ManualDistance, 2),
-		ElevationM:           round(d.Elevation, 2),
-		HRAvg:                round(d.HRAvg, 1),
-		HRMin:                round(d.HRMin, 0),
-		HRMax:                round(d.HRMax, 0),
+		DistanceM:            roundPtr(d.Distance, 2),
+		ManualDistanceM:      roundPtr(d.ManualDistance, 2),
+		ElevationM:           roundPtr(d.Elevation, 2),
+		HRAvg:                roundPtr(d.HRAvg, 1),
+		HRMin:                roundPtr(d.HRMin, 0),
+		HRMax:                roundPtr(d.HRMax, 0),
 		HRZone0:              d.HRZone0,
 		HRZone1:              d.HRZone1,
 		HRZone2:              d.HRZone2,
 		HRZone3:              d.HRZone3,
-		SpO2AvgPct:           round(d.SpO2Average, 1),
+		SpO2AvgPct:           roundPtr(d.SpO2Average, 1),
 		PoolLaps:             d.PoolLaps,
-		PoolLengthM:          round(d.PoolLength, 2),
+		PoolLengthM:          roundPtr(d.PoolLength, 2),
 		Strokes:              d.Strokes,
 		DeviceID:             deviceID,
 	}
@@ -292,6 +319,10 @@ var workoutsCmd = &cobra.Command{
 // writeWorkoutsMarkdown emits one fitdown-style block per workout: a
 // "Workout DATE" heading, the activity name, then concise stat lines. The
 // shape mirrors fitdown's own examples (Workout … / category / details).
+//
+// deref collapses an absent value to zero, which is the right reading
+// in a renderer that already suppresses zero-valued lines — see the
+// note on writeActivityMarkdown.
 func writeWorkoutsMarkdown(rows []workoutRow) error {
 	for _, s := range rows {
 		fmt.Fprintf(os.Stdout, "Workout %s\n\n", s.CalendarDate)
@@ -300,23 +331,25 @@ func writeWorkoutsMarkdown(rows []workoutRow) error {
 			time.Unix(s.StartEpoch, 0).Local().Format("15:04"),
 			time.Unix(s.EndEpoch, 0).Local().Format("15:04"),
 			s.DurationSec/60)
-		if s.Calories > 0 {
-			fmt.Fprintf(os.Stdout, "%s cal\n", fmtRound(s.Calories))
+		if calories := deref(s.Calories); calories > 0 {
+			fmt.Fprintf(os.Stdout, "%s cal\n", fmtRound(calories))
 		}
-		if s.HRAvg > 0 {
-			fmt.Fprintf(os.Stdout, "HR avg %s, %s-%s\n", fmtRound(s.HRAvg), fmtRound(s.HRMin), fmtRound(s.HRMax))
+		if hrAvg := deref(s.HRAvg); hrAvg > 0 {
+			fmt.Fprintf(os.Stdout, "HR avg %s, %s-%s\n",
+				fmtRound(hrAvg), fmtRound(deref(s.HRMin)), fmtRound(deref(s.HRMax)))
 		}
-		if s.Steps > 0 {
-			if s.DistanceM > 0 {
-				fmt.Fprintf(os.Stdout, "%d steps, %s m\n", s.Steps, fmtRound(s.DistanceM))
+		steps, distance := deref(s.Steps), deref(s.DistanceM)
+		if steps > 0 {
+			if distance > 0 {
+				fmt.Fprintf(os.Stdout, "%d steps, %s m\n", steps, fmtRound(distance))
 			} else {
-				fmt.Fprintf(os.Stdout, "%d steps\n", s.Steps)
+				fmt.Fprintf(os.Stdout, "%d steps\n", steps)
 			}
-		} else if s.DistanceM > 0 {
-			fmt.Fprintf(os.Stdout, "%s m\n", fmtRound(s.DistanceM))
+		} else if distance > 0 {
+			fmt.Fprintf(os.Stdout, "%s m\n", fmtRound(distance))
 		}
-		if s.ElevationM > 0 {
-			fmt.Fprintf(os.Stdout, "%s m elevation\n", fmtRound(s.ElevationM))
+		if elevation := deref(s.ElevationM); elevation > 0 {
+			fmt.Fprintf(os.Stdout, "%s m elevation\n", fmtRound(elevation))
 		}
 		fmt.Fprintln(os.Stdout)
 	}
