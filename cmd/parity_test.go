@@ -7,19 +7,44 @@ package cmd
 // and that `--format json` and `--format csv` are two encodings of one
 // dataset rather than two datasets. The shared `compat/formats` bundle
 // checks §4's *structure* — that json is an array, that csv has a
-// header row, that the default is byte-identical to markdown — and it
-// runs withings against an empty stub, so it never sees a row. None of
+// header row, that the default is byte-identical to markdown. None of
 // the key-name, unit, or precision rules are reachable from there.
 //
 // These tests close that gap. They run the real serializers against
 // non-empty fixtures from internal/stubapi on every PR under the plain
 // `go test ./...` job, so a regression fails CI rather than review.
 //
-// Deliberately repo-local for now. Promoting this to a reusable
-// `compat/parity` bundle in quantcli/common is the follow-up (see the
-// PR body); the comparison engine below is exporter-agnostic, but it
-// needs each exporter to supply non-empty fixtures first, and withings
-// is the only one with a stub today.
+// Why this stays, now that common's compat/parity bundle exists
+//
+// quantcli/common grew a shared cross-codec bundle in common#50, and
+// compat_contract_test.go selects it. That bundle does not subsume this
+// file, so both are kept deliberately. The division is what each one
+// can see:
+//
+//   - compat/parity drives the shipped binary. It can therefore attest
+//     the end-to-end result — that no CSV column names a field json
+//     omits, and that every record in one array carries one key set —
+//     but it has no access to a declared schema. It compares the two
+//     codecs to *each other*, so a rename applied to both at once
+//     passes: `distance_m` → `dist_m` in cmd/rowcodec.go's struct tag
+//     changes the json key and the csv header together and the bundle
+//     sees two codecs that still agree.
+//   - canonicalKeys below is that missing declared schema: the exact key
+//     set, in column order, written down independently of the code that
+//     produces it. A rename fails here, in a diff a reviewer reads as a
+//     wire-format change. That is the check the bundle structurally
+//     cannot host — it would need every exporter to hand it a schema,
+//     which is the per-exporter half of the work.
+//
+// maxDecimals and TestDateIsOneRepresentationEverywhere are the same
+// story: the per-field decimal budget (#21, #26) and the timestamp
+// representation (#27) are unit-and-precision rules, and compat/parity
+// documents at its own top that unit correctness is not observable from
+// outside the binary — a JSON number carries no unit at runtime.
+//
+// So: shared bundle for what two codecs can be compared against each
+// other, this file for what they must both be compared against a
+// written-down schema. Neither is redundant.
 
 import (
 	"encoding/csv"
