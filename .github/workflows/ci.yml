@@ -3,8 +3,16 @@ name: CI
 on:
   push:
     branches: [main]
+  # No `branches` filter on pull_request, deliberately. Restricting it to
+  # main meant a PR stacked on another PR's branch got no CI at all — not
+  # a failure, no checks — which is the worst of the three outcomes,
+  # because the PR page looks unobjectionable. A change only reached the
+  # compat suite on its way into main, so a stacked change was reviewed
+  # on the strength of its author's local run.
+  #
+  # Running on every base costs one extra CI pass per stacked PR and
+  # makes the checks mean the same thing wherever a change is reviewed.
   pull_request:
-    branches: [main]
 
 permissions:
   contents: read
