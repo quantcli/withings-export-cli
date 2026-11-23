@@ -50,12 +50,42 @@ const (
 	// DeriveSampleBase is the first sample of the synthetic quiet run
 	// used by the sleep --derive path.
 	DeriveSampleBase int64 = 1776132000
+
+	// The second-day instants, exactly 24h after the first. They key the
+	// sparse second record each series carries — see the comment on
+	// ActivityDay2.
+	WorkoutStart2 int64 = WorkoutStart + 86400
+	WorkoutEnd2   int64 = WorkoutStart2 + 1517
+	SleepStart2   int64 = SleepStart + 86400
+	SleepEnd2     int64 = SleepStart2 + 21600
 )
 
 // ActivityDay is the calendar day the activity fixture reports. Sleep
 // and workout fixtures use the same day so a test can assert that the
 // `date` field agrees across subcommands.
 const ActivityDay = "2026-04-15"
+
+// ActivityDay2 is a second calendar day, present in every series so the
+// fixtures carry more than one record.
+//
+// Two reasons, and the second is the load-bearing one:
+//
+//   - common's compat/parity bundle skips its JSONKeySetIsUniform
+//     subtest below two records, because one record cannot disagree with
+//     itself. A single-record fixture earns a skip, and a skip is a gap
+//     in attestation rather than a pass.
+//   - The second record is deliberately *sparse*: it omits the fields a
+//     cheaper device or an unworn night would not report (the hr_* and
+//     hr_zone_* set, elevation, the respiratory and snoring block, the
+//     pool fields). That is the shape that produced the §4 record-shape
+//     defect in the first place — JSON that passed the upstream `data`
+//     blob through emitted whatever keys the device happened to send, so
+//     no consumer could rely on a field existing. With cmd/rowcodec.go's
+//     declared row structs the absent values render as `null` in JSON
+//     and an empty cell in CSV, and the key set stays fixed. A
+//     regression to envelope passthrough fails the bundle on this
+//     record.
+const ActivityDay2 = "2026-04-16"
 
 // Server is a running stub. Close it via t.Cleanup.
 type Server struct {
@@ -117,9 +147,12 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"status": 0, "body": body})
 }
 
-// activityBody mirrors /v2/measure?action=getactivity for one day.
-// Values are taken from the repro in quantcli/withings-export-cli#26:
-// `calories` and `distance` carry the decimals the API really sends.
+// activityBody mirrors /v2/measure?action=getactivity for two days.
+// Values on the first day are taken from the repro in
+// quantcli/withings-export-cli#26: `calories` and `distance` carry the
+// decimals the API really sends. The second day is the sparse record
+// described on ActivityDay2 — a tracker with no optical heart rate, so
+// the whole hr_* and hr_zone_* block and `elevation` are absent.
 func activityBody() map[string]any {
 	return map[string]any{
 		"activities": []map[string]any{{
@@ -141,6 +174,17 @@ func activityBody() map[string]any {
 			"hr_zone_1":     3000,
 			"hr_zone_2":     1140,
 			"hr_zone_3":     300,
+		}, {
+			"date":          ActivityDay2,
+			"timezone":      "America/New_York",
+			"steps":         4310,
+			"distance":      3281.07,
+			"soft":          3600,
+			"moderate":      420,
+			"intense":       0,
+			"active":        4020,
+			"calories":      211.5,
+			"totalcalories": 912,
 		}},
 		"more":   false,
 		"offset": 0,
@@ -185,6 +229,25 @@ func workoutsBody() map[string]any {
 				"pool_laps":           0,
 				"strokes":             0,
 				"pool_length":         0,
+			},
+		}, {
+			// The sparse session: a manually logged walk from a scale-only
+			// account, so there is no device id, no heart-rate block and
+			// none of the pool fields.
+			"id":        1234567891,
+			"category":  1, // walk
+			"timezone":  "America/New_York",
+			"model":     1,
+			"attrib":    2,
+			"startdate": WorkoutStart2,
+			"enddate":   WorkoutEnd2,
+			"date":      ActivityDay2,
+			"data": map[string]any{
+				"calories":    88.25,
+				"effduration": 1517,
+				"intensity":   20,
+				"steps":       2140,
+				"distance":    1604.5,
 			},
 		}},
 		"more":   false,
@@ -245,6 +308,25 @@ func sleepBody() map[string]any {
 				"snoring":                          960,
 				"snoringepisodecount":              4,
 				"apnea_hypopnea_index":             3.7000000000000002,
+			},
+		}, {
+			// The sparse night: a sleep mat reports stage durations but no
+			// respiratory, snoring or heart-rate analysis, and scores the
+			// night only when it has those inputs.
+			"id":        2233445567,
+			"timezone":  "America/New_York",
+			"model":     16,
+			"startdate": SleepStart2,
+			"enddate":   SleepEnd2,
+			"date":      ActivityDay2,
+			"data": map[string]any{
+				"wakeupduration":     900,
+				"lightsleepduration": 12600,
+				"deepsleepduration":  5400,
+				"remsleepduration":   2700,
+				"durationtosleep":    1020,
+				"durationtowakeup":   360,
+				"wakeupcount":        1,
 			},
 		}},
 		"more":   false,
