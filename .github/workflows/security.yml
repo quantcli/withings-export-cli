@@ -47,8 +47,17 @@ name: security
 on:
   push:
     branches: [main]
+  # No `branches` filter on pull_request — same reason as ci.yml. Restricting
+  # it to main meant a PR stacked on another PR's branch got no scan at all,
+  # and the PR that found this bumps a dependency: govulncheck, osv-scanner
+  # and the license allowlist all silently did not run on the one change class
+  # they exist for. A dependency reaches main through a stacked PR just as
+  # easily as through a direct one.
+  #
+  # This file is propagated from quantcli/common, so the same one-line change
+  # is owed to the canonical copy and the other repos — Quality & Security
+  # owns that propagation.
   pull_request:
-    branches: [main]
   # Daily re-scan. A new advisory landing in the Go vuln DB does not change our
   # code, so push/pull_request alone never re-checks a repo that has no commit
   # traffic — detection would depend on commit activity, which is unrelated to
