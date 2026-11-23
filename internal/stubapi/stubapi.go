@@ -44,8 +44,17 @@ const (
 	// MeasureAt is the instant of the single measurement group.
 	MeasureAt int64 = 1776247500
 
-	// IntradaySampleAt is the instant of the single intraday sample.
+	// IntradaySampleAt is the instant of the fully populated intraday
+	// sample — an Apple Watch minute, every data field reported.
 	IntradaySampleAt int64 = 1776247260
+
+	// IntradaySparseSampleAt is the minute after it, and the sparse
+	// counterpart: a native tracker with no optical sensor and no
+	// barometer, so the sample carries steps and distance and nothing
+	// else. `intraday` needs its own sparse record because its series
+	// is keyed per sample rather than per day, so the second-day
+	// records on the other fixtures do not reach it.
+	IntradaySparseSampleAt int64 = IntradaySampleAt + 60
 
 	// DeriveSampleBase is the first sample of the synthetic quiet run
 	// used by the sleep --derive path.
@@ -334,9 +343,16 @@ func sleepBody() map[string]any {
 	}
 }
 
-// intradayBody mirrors /v2/measure?action=getintradayactivity with a
-// single sample. The series is keyed by epoch-second *strings*, which
-// is what the real API does.
+// intradayBody mirrors /v2/measure?action=getintradayactivity with two
+// consecutive samples. The series is keyed by epoch-second *strings*,
+// which is what the real API does.
+//
+// The first sample is fully populated; the second is the sparse one
+// described on IntradaySparseSampleAt, and it is the reason this
+// fixture has two. Intraday is the sparsest surface in the CLI —
+// whether a given minute carries a heart rate, an HRV pair or an SpO2
+// reading depends on what the watch was doing — so a fixture of one
+// all-fields-present sample cannot see the §4 record-shape rule at all.
 func intradayBody() map[string]any {
 	return map[string]any{
 		"series": map[string]any{
@@ -353,6 +369,14 @@ func intradayBody() map[string]any {
 				"spo2_auto":   97.5,
 				"model":       "ScanWatch 2",
 				"model_id":    62,
+			},
+			itoa(IntradaySparseSampleAt): map[string]any{
+				"duration": 60,
+				"steps":    12,
+				"distance": 9.14,
+				"calories": 0.4,
+				"model":    "Move",
+				"model_id": 91,
 			},
 		},
 	}
