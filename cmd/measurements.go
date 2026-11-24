@@ -153,7 +153,6 @@ var measurementsCmd = &cobra.Command{
 
 func writeMeasurementsCSV(rows []measurementRow) error {
 	w := csv.NewWriter(os.Stdout)
-	defer w.Flush()
 	if err := w.Write([]string{"date", "type", "type_code", "value", "device_id", "grp_id"}); err != nil {
 		return err
 	}
@@ -169,7 +168,8 @@ func writeMeasurementsCSV(rows []measurementRow) error {
 			return err
 		}
 	}
-	return nil
+	w.Flush()
+	return w.Error() // a failed write must exit non-zero
 }
 
 // fmtMeasurement renders a measurement value with up to 3 decimal places,

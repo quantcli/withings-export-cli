@@ -153,7 +153,6 @@ var workoutsCmd = &cobra.Command{
 
 func writeWorkoutsCSV(series []workoutSeries) error {
 	w := csv.NewWriter(os.Stdout)
-	defer w.Flush()
 	header := []string{
 		"date", "start", "end", "category", "category_code", "timezone",
 		"duration_min", "eff_duration_min", "calories", "steps",
@@ -215,7 +214,8 @@ func writeWorkoutsCSV(series []workoutSeries) error {
 			return err
 		}
 	}
-	return nil
+	w.Flush()
+	return w.Error() // a failed write must exit non-zero
 }
 
 // writeWorkoutsMarkdown emits one fitdown-style block per workout: a

@@ -105,7 +105,6 @@ var activityCmd = &cobra.Command{
 
 func writeActivityCSV(days []activityDay) error {
 	w := csv.NewWriter(os.Stdout)
-	defer w.Flush()
 	header := []string{
 		"date", "timezone", "steps", "distance_m", "elevation_m",
 		"soft_sec", "moderate_sec", "intense_sec", "active_sec",
@@ -141,7 +140,8 @@ func writeActivityCSV(days []activityDay) error {
 			return err
 		}
 	}
-	return nil
+	w.Flush()
+	return w.Error() // a failed write must exit non-zero
 }
 
 // writeActivityMarkdown emits one fitdown-style block per day. Empty/zero
