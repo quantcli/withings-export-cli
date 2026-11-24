@@ -145,53 +145,7 @@ func writeSleepCSV(series []sleepSeries) error {
 		return err
 	}
 	for _, s := range series {
-		var d struct {
-			Wake          int     `json:"wakeupduration"`
-			Light         int     `json:"lightsleepduration"`
-			Deep          int     `json:"deepsleepduration"`
-			REM           int     `json:"remsleepduration"`
-			ToSleep       int     `json:"durationtosleep"`
-			ToWakeup      int     `json:"durationtowakeup"`
-			WakeupCount   int     `json:"wakeupcount"`
-			SleepScore    int     `json:"sleep_score"`
-			HRAvg         float64 `json:"hr_average"`
-			HRMin         float64 `json:"hr_min"`
-			HRMax         float64 `json:"hr_max"`
-			RRAvg         float64 `json:"rr_average"`
-			RRMin         float64 `json:"rr_min"`
-			RRMax         float64 `json:"rr_max"`
-			SnoreEpisodes int     `json:"snoringepisodecount"`
-			ApneaHypopnea float64 `json:"apnea_hypopnea_index"`
-		}
-		_ = json.Unmarshal(s.Data, &d)
-
-		start := time.Unix(s.StartDate, 0).Local()
-		end := time.Unix(s.EndDate, 0).Local()
-		totalSleepMin := (d.Light + d.Deep + d.REM) / 60
-
-		row := []string{
-			s.Date,
-			start.Format(time.RFC3339),
-			end.Format(time.RFC3339),
-			s.Timezone,
-			strconv.Itoa(totalSleepMin),
-			strconv.Itoa(d.Light / 60),
-			strconv.Itoa(d.Deep / 60),
-			strconv.Itoa(d.REM / 60),
-			strconv.Itoa(d.ToSleep),
-			strconv.Itoa(d.ToWakeup),
-			strconv.Itoa(d.WakeupCount),
-			strconv.Itoa(d.SleepScore),
-			strconv.FormatFloat(d.HRAvg, 'f', -1, 64),
-			strconv.FormatFloat(d.HRMin, 'f', -1, 64),
-			strconv.FormatFloat(d.HRMax, 'f', -1, 64),
-			strconv.FormatFloat(d.RRAvg, 'f', -1, 64),
-			strconv.FormatFloat(d.RRMin, 'f', -1, 64),
-			strconv.FormatFloat(d.RRMax, 'f', -1, 64),
-			strconv.Itoa(d.SnoreEpisodes),
-			strconv.FormatFloat(d.ApneaHypopnea, 'f', -1, 64),
-			s.Source,
-		}
+		row := sleepCSVRow(s)
 		if err := w.Write(row); err != nil {
 			return err
 		}
@@ -351,6 +305,84 @@ func deriveSleep(c *client.Client, date time.Time) (*sleepSeries, error) {
 		Data:      json.RawMessage(data),
 		Source:    "derived",
 	}, nil
+}
+
+// sleepCSVRow renders one night. A field the device didn't report is an
+// empty cell, not 0, so a missing reading can't pass for a real one.
+// Derived rows carry only a total (stored in lightsleepduration so the JSON
+// and markdown paths keep working), so their stage cells stay empty.
+func sleepCSVRow(s sleepSeries) []string {
+	var d struct {
+		Light         *int     `json:"lightsleepduration"`
+		Deep          *int     `json:"deepsleepduration"`
+		REM           *int     `json:"remsleepduration"`
+		ToSleep       *int     `json:"durationtosleep"`
+		ToWakeup      *int     `json:"durationtowakeup"`
+		WakeupCount   *int     `json:"wakeupcount"`
+		SleepScore    *int     `json:"sleep_score"`
+		HRAvg         *float64 `json:"hr_average"`
+		HRMin         *float64 `json:"hr_min"`
+		HRMax         *float64 `json:"hr_max"`
+		RRAvg         *float64 `json:"rr_average"`
+		RRMin         *float64 `json:"rr_min"`
+		RRMax         *float64 `json:"rr_max"`
+		SnoreEpisodes *int     `json:"snoringepisodecount"`
+		ApneaHypopnea *float64 `json:"apnea_hypopnea_index"`
+	}
+	_ = json.Unmarshal(s.Data, &d)
+
+	var total *int
+	for _, v := range []*int{d.Light, d.Deep, d.REM} {
+		if v != nil {
+			sum := *v
+			if total != nil {
+				sum += *total
+			}
+			total = &sum
+		}
+	}
+	light, deep, rem := d.Light, d.Deep, d.REM
+	if s.Source == "derived" {
+		light, deep, rem = nil, nil, nil
+	}
+
+	return []string{
+		s.Date,
+		time.Unix(s.StartDate, 0).Local().Format(time.RFC3339),
+		time.Unix(s.EndDate, 0).Local().Format(time.RFC3339),
+		s.Timezone,
+		csvInt(total, 60),
+		csvInt(light, 60),
+		csvInt(deep, 60),
+		csvInt(rem, 60),
+		csvInt(d.ToSleep, 1),
+		csvInt(d.ToWakeup, 1),
+		csvInt(d.WakeupCount, 1),
+		csvInt(d.SleepScore, 1),
+		csvFloat(d.HRAvg),
+		csvFloat(d.HRMin),
+		csvFloat(d.HRMax),
+		csvFloat(d.RRAvg),
+		csvFloat(d.RRMin),
+		csvFloat(d.RRMax),
+		csvInt(d.SnoreEpisodes, 1),
+		csvFloat(d.ApneaHypopnea),
+		s.Source,
+	}
+}
+
+func csvInt(v *int, div int) string {
+	if v == nil {
+		return ""
+	}
+	return strconv.Itoa(*v / div)
+}
+
+func csvFloat(v *float64) string {
+	if v == nil {
+		return ""
+	}
+	return strconv.FormatFloat(*v, 'f', -1, 64)
 }
 
 // writeSleepMarkdown emits one fitdown-style block per night. Stage breakdown,
