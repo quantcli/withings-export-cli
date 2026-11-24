@@ -47,8 +47,8 @@ name: security
 on:
   push:
     branches: [main]
+  # Every PR, whatever its base: a branches filter skipped stacked PRs silently.
   pull_request:
-    branches: [main]
   # Daily re-scan. A new advisory landing in the Go vuln DB does not change our
   # code, so push/pull_request alone never re-checks a repo that has no commit
   # traffic — detection would depend on commit activity, which is unrelated to
