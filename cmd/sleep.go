@@ -132,7 +132,6 @@ var sleepCmd = &cobra.Command{
 
 func writeSleepCSV(series []sleepSeries) error {
 	w := csv.NewWriter(os.Stdout)
-	defer w.Flush()
 	header := []string{
 		"date", "start", "end", "timezone",
 		"total_sleep_min", "light_min", "deep_min", "rem_min",
@@ -150,7 +149,8 @@ func writeSleepCSV(series []sleepSeries) error {
 			return err
 		}
 	}
-	return nil
+	w.Flush()
+	return w.Error() // a failed write must exit non-zero
 }
 
 // deriveSleep polyfills a sleep start/end for a night that has no getsummary

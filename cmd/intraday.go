@@ -146,7 +146,6 @@ Default window is the last 24h — intraday is dense; wider ranges are slow.`,
 
 func writeIntradayCSV(samples []intradaySample) error {
 	w := csv.NewWriter(os.Stdout)
-	defer w.Flush()
 	header := []string{
 		"timestamp", "datetime", "duration_sec",
 		"steps", "distance_m", "elevation_m", "calories",
@@ -177,7 +176,8 @@ func writeIntradayCSV(samples []intradaySample) error {
 			return err
 		}
 	}
-	return nil
+	w.Flush()
+	return w.Error() // a failed write must exit non-zero
 }
 
 // writeIntradayMarkdown emits one fitdown-style "Intraday DATE" block per
