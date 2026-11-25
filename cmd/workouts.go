@@ -174,20 +174,21 @@ func writeWorkoutsCSV(series []workoutSeries) error {
 	return w.Error() // a failed write must exit non-zero
 }
 
+// workoutsCSVRow leaves unreported measurements empty instead of writing 0.
 func workoutsCSVRow(s workoutSeries) []string {
 	var d struct {
-		Calories    float64 `json:"calories"`
-		EffDuration int     `json:"effduration"`
-		Distance    float64 `json:"distance"`
-		Elevation   float64 `json:"elevation"`
-		Steps       int     `json:"steps"`
-		HRAvg       float64 `json:"hr_average"`
-		HRMin       float64 `json:"hr_min"`
-		HRMax       float64 `json:"hr_max"`
-		HRZone0     int     `json:"hr_zone_0"`
-		HRZone1     int     `json:"hr_zone_1"`
-		HRZone2     int     `json:"hr_zone_2"`
-		HRZone3     int     `json:"hr_zone_3"`
+		Calories    *float64 `json:"calories"`
+		EffDuration *int     `json:"effduration"`
+		Distance    *float64 `json:"distance"`
+		Elevation   *float64 `json:"elevation"`
+		Steps       *int     `json:"steps"`
+		HRAvg       *float64 `json:"hr_average"`
+		HRMin       *float64 `json:"hr_min"`
+		HRMax       *float64 `json:"hr_max"`
+		HRZone0     *int     `json:"hr_zone_0"`
+		HRZone1     *int     `json:"hr_zone_1"`
+		HRZone2     *int     `json:"hr_zone_2"`
+		HRZone3     *int     `json:"hr_zone_3"`
 	}
 	_ = json.Unmarshal(s.Data, &d)
 
@@ -206,18 +207,18 @@ func workoutsCSVRow(s workoutSeries) []string {
 		strconv.Itoa(s.Category),
 		s.Timezone,
 		strconv.Itoa(int(end.Sub(start).Minutes())),
-		strconv.Itoa(d.EffDuration / 60),
-		strconv.FormatFloat(d.Calories, 'f', -1, 64),
-		strconv.Itoa(d.Steps),
-		strconv.FormatFloat(d.Distance, 'f', -1, 64),
-		strconv.FormatFloat(d.Elevation, 'f', -1, 64),
-		strconv.FormatFloat(d.HRAvg, 'f', -1, 64),
-		strconv.FormatFloat(d.HRMin, 'f', -1, 64),
-		strconv.FormatFloat(d.HRMax, 'f', -1, 64),
-		strconv.Itoa(d.HRZone0),
-		strconv.Itoa(d.HRZone1),
-		strconv.Itoa(d.HRZone2),
-		strconv.Itoa(d.HRZone3),
+		csvInt(d.EffDuration, 60),
+		csvFloat(d.Calories),
+		csvInt(d.Steps, 1),
+		csvFloat(d.Distance),
+		csvFloat(d.Elevation),
+		csvFloat(d.HRAvg),
+		csvFloat(d.HRMin),
+		csvFloat(d.HRMax),
+		csvInt(d.HRZone0, 1),
+		csvInt(d.HRZone1, 1),
+		csvInt(d.HRZone2, 1),
+		csvInt(d.HRZone3, 1),
 		s.DeviceID,
 	}
 }

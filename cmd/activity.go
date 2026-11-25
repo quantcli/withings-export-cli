@@ -13,24 +13,24 @@ import (
 )
 
 type activityDay struct {
-	Date          string  `json:"date"`
-	Timezone      string  `json:"timezone"`
-	Steps         int     `json:"steps"`
-	Distance      float64 `json:"distance"`
-	Elevation     float64 `json:"elevation"`
-	Soft          int     `json:"soft"`
-	Moderate      int     `json:"moderate"`
-	Intense       int     `json:"intense"`
-	Active        int     `json:"active"`
-	Calories      float64 `json:"calories"`
-	TotalCalories float64 `json:"totalcalories"`
-	HRAvg         float64 `json:"hr_average"`
-	HRMin         float64 `json:"hr_min"`
-	HRMax         float64 `json:"hr_max"`
-	HRZone0       int     `json:"hr_zone_0"`
-	HRZone1       int     `json:"hr_zone_1"`
-	HRZone2       int     `json:"hr_zone_2"`
-	HRZone3       int     `json:"hr_zone_3"`
+	Date          string   `json:"date"`
+	Timezone      string   `json:"timezone"`
+	Steps         *int     `json:"steps"`
+	Distance      *float64 `json:"distance"`
+	Elevation     *float64 `json:"elevation"`
+	Soft          *int     `json:"soft"`
+	Moderate      *int     `json:"moderate"`
+	Intense       *int     `json:"intense"`
+	Active        *int     `json:"active"`
+	Calories      *float64 `json:"calories"`
+	TotalCalories *float64 `json:"totalcalories"`
+	HRAvg         *float64 `json:"hr_average"`
+	HRMin         *float64 `json:"hr_min"`
+	HRMax         *float64 `json:"hr_max"`
+	HRZone0       *int     `json:"hr_zone_0"`
+	HRZone1       *int     `json:"hr_zone_1"`
+	HRZone2       *int     `json:"hr_zone_2"`
+	HRZone3       *int     `json:"hr_zone_3"`
 }
 
 type activityResponse struct {
@@ -125,26 +125,27 @@ func writeActivityCSV(days []activityDay) error {
 	return w.Error() // a failed write must exit non-zero
 }
 
+// activityCSVRow leaves unreported measurements empty instead of writing 0.
 func activityCSVRow(d activityDay) []string {
 	return []string{
 		d.Date,
 		d.Timezone,
-		strconv.Itoa(d.Steps),
-		strconv.FormatFloat(d.Distance, 'f', -1, 64),
-		strconv.FormatFloat(d.Elevation, 'f', -1, 64),
-		strconv.Itoa(d.Soft),
-		strconv.Itoa(d.Moderate),
-		strconv.Itoa(d.Intense),
-		strconv.Itoa(d.Active),
-		strconv.FormatFloat(d.Calories, 'f', -1, 64),
-		strconv.FormatFloat(d.TotalCalories, 'f', -1, 64),
-		strconv.FormatFloat(d.HRAvg, 'f', -1, 64),
-		strconv.FormatFloat(d.HRMin, 'f', -1, 64),
-		strconv.FormatFloat(d.HRMax, 'f', -1, 64),
-		strconv.Itoa(d.HRZone0),
-		strconv.Itoa(d.HRZone1),
-		strconv.Itoa(d.HRZone2),
-		strconv.Itoa(d.HRZone3),
+		csvInt(d.Steps, 1),
+		csvFloat(d.Distance),
+		csvFloat(d.Elevation),
+		csvInt(d.Soft, 1),
+		csvInt(d.Moderate, 1),
+		csvInt(d.Intense, 1),
+		csvInt(d.Active, 1),
+		csvFloat(d.Calories),
+		csvFloat(d.TotalCalories),
+		csvFloat(d.HRAvg),
+		csvFloat(d.HRMin),
+		csvFloat(d.HRMax),
+		csvInt(d.HRZone0, 1),
+		csvInt(d.HRZone1, 1),
+		csvInt(d.HRZone2, 1),
+		csvInt(d.HRZone3, 1),
 	}
 }
 
@@ -152,26 +153,45 @@ func activityCSVRow(d activityDay) []string {
 // fields are dropped to keep output tight.
 func writeActivityMarkdown(days []activityDay) error {
 	for _, d := range days {
+		steps := activityValue(d.Steps)
+		distance := activityValue(d.Distance)
+		calories := activityValue(d.Calories)
+		totalCalories := activityValue(d.TotalCalories)
+		hrAvg := activityValue(d.HRAvg)
+		hrMin := activityValue(d.HRMin)
+		hrMax := activityValue(d.HRMax)
+		active := activityValue(d.Active)
+		soft := activityValue(d.Soft)
+		moderate := activityValue(d.Moderate)
+		intense := activityValue(d.Intense)
+		elevation := activityValue(d.Elevation)
 		fmt.Fprintf(os.Stdout, "Activity %s\n\n", d.Date)
-		if d.Steps > 0 || d.Distance > 0 {
-			fmt.Fprintf(os.Stdout, "%d steps, %.2f km\n", d.Steps, d.Distance/1000)
+		if steps > 0 || distance > 0 {
+			fmt.Fprintf(os.Stdout, "%d steps, %.2f km\n", steps, distance/1000)
 		}
-		if d.Calories > 0 || d.TotalCalories > 0 {
-			fmt.Fprintf(os.Stdout, "%s cal active, %s total\n", fmtRound(d.Calories), fmtRound(d.TotalCalories))
+		if calories > 0 || totalCalories > 0 {
+			fmt.Fprintf(os.Stdout, "%s cal active, %s total\n", fmtRound(calories), fmtRound(totalCalories))
 		}
-		if d.HRAvg > 0 {
-			fmt.Fprintf(os.Stdout, "HR avg %s, %s-%s\n", fmtRound(d.HRAvg), fmtRound(d.HRMin), fmtRound(d.HRMax))
+		if hrAvg > 0 {
+			fmt.Fprintf(os.Stdout, "HR avg %s, %s-%s\n", fmtRound(hrAvg), fmtRound(hrMin), fmtRound(hrMax))
 		}
-		if d.Active > 0 {
+		if active > 0 {
 			fmt.Fprintf(os.Stdout, "Active %s — %s soft, %s moderate, %s intense\n",
-				fmtDur(d.Active), fmtDur(d.Soft), fmtDur(d.Moderate), fmtDur(d.Intense))
+				fmtDur(active), fmtDur(soft), fmtDur(moderate), fmtDur(intense))
 		}
-		if d.Elevation > 0 {
-			fmt.Fprintf(os.Stdout, "%s m elevation\n", fmtRound(d.Elevation))
+		if elevation > 0 {
+			fmt.Fprintf(os.Stdout, "%s m elevation\n", fmtRound(elevation))
 		}
 		fmt.Fprintln(os.Stdout)
 	}
 	return nil
+}
+
+func activityValue[T int | float64](v *T) T {
+	if v == nil {
+		return 0
+	}
+	return *v
 }
 
 func init() {
