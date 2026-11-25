@@ -165,57 +165,61 @@ func writeWorkoutsCSV(series []workoutSeries) error {
 		return err
 	}
 	for _, s := range series {
-		var d struct {
-			Calories    float64 `json:"calories"`
-			EffDuration int     `json:"effduration"`
-			Distance    float64 `json:"distance"`
-			Elevation   float64 `json:"elevation"`
-			Steps       int     `json:"steps"`
-			HRAvg       float64 `json:"hr_average"`
-			HRMin       float64 `json:"hr_min"`
-			HRMax       float64 `json:"hr_max"`
-			HRZone0     int     `json:"hr_zone_0"`
-			HRZone1     int     `json:"hr_zone_1"`
-			HRZone2     int     `json:"hr_zone_2"`
-			HRZone3     int     `json:"hr_zone_3"`
-		}
-		_ = json.Unmarshal(s.Data, &d)
-
-		start := time.Unix(s.StartDate, 0).Local()
-		end := time.Unix(s.EndDate, 0).Local()
-		category := workoutCategoryNames[s.Category]
-		if category == "" {
-			category = "unknown"
-		}
-
-		row := []string{
-			s.Date,
-			start.Format(time.RFC3339),
-			end.Format(time.RFC3339),
-			category,
-			strconv.Itoa(s.Category),
-			s.Timezone,
-			strconv.Itoa(int(end.Sub(start).Minutes())),
-			strconv.Itoa(d.EffDuration / 60),
-			strconv.FormatFloat(d.Calories, 'f', -1, 64),
-			strconv.Itoa(d.Steps),
-			strconv.FormatFloat(d.Distance, 'f', -1, 64),
-			strconv.FormatFloat(d.Elevation, 'f', -1, 64),
-			strconv.FormatFloat(d.HRAvg, 'f', -1, 64),
-			strconv.FormatFloat(d.HRMin, 'f', -1, 64),
-			strconv.FormatFloat(d.HRMax, 'f', -1, 64),
-			strconv.Itoa(d.HRZone0),
-			strconv.Itoa(d.HRZone1),
-			strconv.Itoa(d.HRZone2),
-			strconv.Itoa(d.HRZone3),
-			s.DeviceID,
-		}
+		row := workoutsCSVRow(s)
 		if err := w.Write(row); err != nil {
 			return err
 		}
 	}
 	w.Flush()
 	return w.Error() // a failed write must exit non-zero
+}
+
+func workoutsCSVRow(s workoutSeries) []string {
+	var d struct {
+		Calories    float64 `json:"calories"`
+		EffDuration int     `json:"effduration"`
+		Distance    float64 `json:"distance"`
+		Elevation   float64 `json:"elevation"`
+		Steps       int     `json:"steps"`
+		HRAvg       float64 `json:"hr_average"`
+		HRMin       float64 `json:"hr_min"`
+		HRMax       float64 `json:"hr_max"`
+		HRZone0     int     `json:"hr_zone_0"`
+		HRZone1     int     `json:"hr_zone_1"`
+		HRZone2     int     `json:"hr_zone_2"`
+		HRZone3     int     `json:"hr_zone_3"`
+	}
+	_ = json.Unmarshal(s.Data, &d)
+
+	start := time.Unix(s.StartDate, 0).Local()
+	end := time.Unix(s.EndDate, 0).Local()
+	category := workoutCategoryNames[s.Category]
+	if category == "" {
+		category = "unknown"
+	}
+
+	return []string{
+		s.Date,
+		start.Format(time.RFC3339),
+		end.Format(time.RFC3339),
+		category,
+		strconv.Itoa(s.Category),
+		s.Timezone,
+		strconv.Itoa(int(end.Sub(start).Minutes())),
+		strconv.Itoa(d.EffDuration / 60),
+		strconv.FormatFloat(d.Calories, 'f', -1, 64),
+		strconv.Itoa(d.Steps),
+		strconv.FormatFloat(d.Distance, 'f', -1, 64),
+		strconv.FormatFloat(d.Elevation, 'f', -1, 64),
+		strconv.FormatFloat(d.HRAvg, 'f', -1, 64),
+		strconv.FormatFloat(d.HRMin, 'f', -1, 64),
+		strconv.FormatFloat(d.HRMax, 'f', -1, 64),
+		strconv.Itoa(d.HRZone0),
+		strconv.Itoa(d.HRZone1),
+		strconv.Itoa(d.HRZone2),
+		strconv.Itoa(d.HRZone3),
+		s.DeviceID,
+	}
 }
 
 // writeWorkoutsMarkdown emits one fitdown-style block per workout: a

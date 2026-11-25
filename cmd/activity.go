@@ -116,32 +116,36 @@ func writeActivityCSV(days []activityDay) error {
 		return err
 	}
 	for _, d := range days {
-		row := []string{
-			d.Date,
-			d.Timezone,
-			strconv.Itoa(d.Steps),
-			strconv.FormatFloat(d.Distance, 'f', -1, 64),
-			strconv.FormatFloat(d.Elevation, 'f', -1, 64),
-			strconv.Itoa(d.Soft),
-			strconv.Itoa(d.Moderate),
-			strconv.Itoa(d.Intense),
-			strconv.Itoa(d.Active),
-			strconv.FormatFloat(d.Calories, 'f', -1, 64),
-			strconv.FormatFloat(d.TotalCalories, 'f', -1, 64),
-			strconv.FormatFloat(d.HRAvg, 'f', -1, 64),
-			strconv.FormatFloat(d.HRMin, 'f', -1, 64),
-			strconv.FormatFloat(d.HRMax, 'f', -1, 64),
-			strconv.Itoa(d.HRZone0),
-			strconv.Itoa(d.HRZone1),
-			strconv.Itoa(d.HRZone2),
-			strconv.Itoa(d.HRZone3),
-		}
+		row := activityCSVRow(d)
 		if err := w.Write(row); err != nil {
 			return err
 		}
 	}
 	w.Flush()
 	return w.Error() // a failed write must exit non-zero
+}
+
+func activityCSVRow(d activityDay) []string {
+	return []string{
+		d.Date,
+		d.Timezone,
+		strconv.Itoa(d.Steps),
+		strconv.FormatFloat(d.Distance, 'f', -1, 64),
+		strconv.FormatFloat(d.Elevation, 'f', -1, 64),
+		strconv.Itoa(d.Soft),
+		strconv.Itoa(d.Moderate),
+		strconv.Itoa(d.Intense),
+		strconv.Itoa(d.Active),
+		strconv.FormatFloat(d.Calories, 'f', -1, 64),
+		strconv.FormatFloat(d.TotalCalories, 'f', -1, 64),
+		strconv.FormatFloat(d.HRAvg, 'f', -1, 64),
+		strconv.FormatFloat(d.HRMin, 'f', -1, 64),
+		strconv.FormatFloat(d.HRMax, 'f', -1, 64),
+		strconv.Itoa(d.HRZone0),
+		strconv.Itoa(d.HRZone1),
+		strconv.Itoa(d.HRZone2),
+		strconv.Itoa(d.HRZone3),
+	}
 }
 
 // writeActivityMarkdown emits one fitdown-style block per day. Empty/zero
